@@ -92,7 +92,32 @@ struct GeluGradFunctor {
           n, static_cast<T>(0.5 * M_2_SQRTPI * M_SQRT1_2), second, 1);
 
       // dx = dout * (first + second);
-      funcs::CBlas<T>::VADD(n, first, second, first);
+      // original: funcs::CBlas<T>::VADD(n, first, second, first);
+      // alternative 1: elementwise_add kernel
+      //   {
+      //     DenseTensor first_tensor, second_tensor, sum_tensor;
+      //     first_tensor.Resize({n});
+      //     second_tensor.Resize({n});
+      //     sum_tensor.Resize({n});
+      //     auto* first_data = dev_ctx.template HostAlloc<T>(&first_tensor, n);
+      //     auto* second_data = dev_ctx.template HostAlloc<T>(&second_tensor,
+      //     n); auto* sum_data = dev_ctx.template HostAlloc<T>(&sum_tensor, n);
+      //     std::memcpy(first_data, first, n * sizeof(T));
+      //     std::memcpy(second_data, second, n * sizeof(T));
+      //     phi::AddKernel<T, CPUContext>(dev_ctx, first_tensor, second_tensor,
+      //     &sum_tensor); std::memcpy(first, sum_data, n * sizeof(T));
+      //   }
+      // Eigen vectorized add (zero-copy via Eigen::Map)
+      {
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> eigen_first(first, n);
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> eigen_second(second, n);
+        eigen_first = eigen_first + eigen_second;
+      }
+      // alternative 3: manual loop
+      //   for (int i = 0; i < n; ++i) {
+      //     first[i] = first[i] + second[i];
+      //   }
+
       funcs::CBlas<T>::VMUL(n, dout_data, first, dx_data);
 
       std::free(first);

@@ -78,16 +78,6 @@ struct CBlas<phi::bfloat16> {
   }
 
   template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::bfloat16 *x,
-                   const phi::bfloat16 *y,
-                   phi::bfloat16 *z) {
-    for (int i = 0; i < n; ++i) {
-      z[i] = x[i] + y[i];
-    }
-  }
-
-  template <typename... ARGS>
   static void VMUL(int n,
                    const phi::bfloat16 *x,
                    const phi::bfloat16 *y,
@@ -176,11 +166,6 @@ struct CBlas<float> {
   template <typename... ARGS>
   static void GEMM_BATCH(ARGS... args) {
     phi::dynload::cblas_sgemm_batch(args...);
-  }
-
-  template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vsAdd(args...);
   }
 
   template <typename... ARGS>
@@ -305,11 +290,6 @@ struct CBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vdAdd(args...);
-  }
-
-  template <typename... ARGS>
   static void VSUB(ARGS... args) {
     phi::dynload::vdSub(args...);
   }
@@ -383,11 +363,6 @@ struct CBlas<phi::complex64> {
   // so replace with the raw operator methods
   /*
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vcAdd(args...);
-  }
-
-  template <typename... ARGS>
   static void VSUB(ARGS... args) {
     phi::dynload::vcSub(args...);
   }
@@ -402,16 +377,6 @@ struct CBlas<phi::complex64> {
     phi::dynload::vcDiv(args...);
   }
   */
-
-  template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
-  }
 
   template <typename... ARGS>
   static void VSUB(int n,
@@ -581,11 +546,6 @@ struct CBlas<phi::complex128> {
   // so replace with the raw operator methods
   /*
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vzAdd(args...);
-  }
-
-  template <typename... ARGS>
   static void VSUB(ARGS... args) {
     phi::dynload::vzSub(args...);
   }
@@ -600,16 +560,6 @@ struct CBlas<phi::complex128> {
     phi::dynload::vzDiv(args...);
   }
   */
-
-  template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
-  }
 
   template <typename... ARGS>
   static void VSUB(int n,
@@ -806,11 +756,6 @@ struct CBlas<float> {
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vsAdd(args...);
-  }
-
-  template <typename... ARGS>
   static void VSUB(ARGS... args) {
     phi::dynload::vsSub(args...);
   }
@@ -889,11 +834,6 @@ struct CBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vdAdd(args...);
-  }
-
-  template <typename... ARGS>
   static void VSUB(ARGS... args) {
     phi::dynload::vdSub(args...);
   }
@@ -949,16 +889,6 @@ struct CBlas<phi::complex64> {
   template <typename... ARGS>
   static void VCOPY(ARGS... args) {
     phi::dynload::cblas_ccopy(args...);
-  }
-
-  template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
   }
 
   template <typename... ARGS>
@@ -1122,16 +1052,6 @@ struct CBlas<phi::complex128> {
   template <typename... ARGS>
   static void VCOPY(ARGS... args) {
     phi::dynload::cblas_zcopy(args...);
-  }
-
-  template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
   }
 
   template <typename... ARGS>
@@ -1770,21 +1690,6 @@ template <>
 template <typename T>
 void Blas<CPUContext>::VCOPY(int n, const T *x, T *y) const {
   CBlas<T>::VCOPY(n, x, 1, y, 1);
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VADD(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VADD(n, x, y, z);
-#else
-  if (x == z) {
-    this->template AXPY<T>(n, (T)(1.), y, z);
-  } else {
-    this->template VCOPY<T>(n, y, z);
-    this->template AXPY<T>(n, (T)(1.), x, z);
-  }
-#endif
 }
 
 template <>

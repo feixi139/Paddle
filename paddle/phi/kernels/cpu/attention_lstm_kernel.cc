@@ -17,6 +17,7 @@
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/cpu_vec.h"
+#include "paddle/phi/kernels/funcs/eigen/common.h"
 #include "paddle/phi/kernels/funcs/fc_functor.h"
 #include "paddle/utils/optional.h"
 
@@ -198,7 +199,15 @@ void AttentionLSTMKernel(const Context& dev_ctx,
                   D4);
       }
       // since input is 1xM, so can use add bias
-      blas.VADD(D4, lstm_b_data, lstm_out_data, lstm_out_data);
+      {
+        int n = D4;
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> z_map(lstm_out_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(lstm_b_data,
+                                                                    n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> y_map(
+            lstm_out_data, n);
+        z_map = x_map + y_map;
+      }
 
       // gate act: sigmoid
       act_gate(D3, lstm_out_data, lstm_out_data);
@@ -212,7 +221,16 @@ void AttentionLSTMKernel(const Context& dev_ctx,
       blas.VMUL(D, lstm_out_data + D, lstm_out_data + D3, lstm_out_data + D);
 
       // cell_out = a + b
-      blas.VADD(D, lstm_out_data, lstm_out_data + D, cur_cell_out_data);
+      {
+        int n = D;
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> z_map(cur_cell_out_data,
+                                                              n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(
+            lstm_out_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> y_map(
+            lstm_out_data + D, n);
+        z_map = x_map + y_map;
+      }
 
       // state act tanh(cell_out) * output_gate
       act_cell(D, cur_cell_out_data, lstm_out_data);

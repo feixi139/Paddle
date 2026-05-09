@@ -39,16 +39,18 @@ elementwise_inner_add(const CPUContext& dev_ctx,
                       size_t src_index,
                       IndexT dst_index,
                       size_t slice_size) {
-  auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
-  blas.VADD(slice_size,
-            src_pointer + src_index * slice_size,
-            dst_pointer + dst_index * slice_size,
-            dst_pointer + dst_index * slice_size);
+  auto n = static_cast<int>(slice_size);
+  auto* z = dst_pointer + dst_index * slice_size;
+  const auto* x = src_pointer + src_index * slice_size;
+  Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> z_map(z, n);
+  Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(x, n);
+  Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> y_map(z, n);
+  z_map = x_map + y_map;
 }
 
 template <typename T, typename IndexT = int>
 typename std::enable_if<!std::is_floating_point<T>::value>::type
-elementwise_inner_add(const CPUContext& dev_ctx UNUSED,
+elementwise_inner_add(const CPUContext& dev_ctx,
                       const T* src_pointer,
                       T* dst_pointer,
                       size_t src_index,
