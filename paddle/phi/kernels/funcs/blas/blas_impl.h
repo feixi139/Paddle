@@ -86,16 +86,6 @@ struct CBlas<phi::bfloat16> {
       z[i] = x[i] * y[i];
     }
   }
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::bfloat16 *x,
-                   const phi::bfloat16 *y,
-                   phi::bfloat16 *z) {
-    for (int i = 0; i < n; ++i) {
-      z[i] = x[i] - y[i];
-    }
-  }
 };
 
 #ifdef PADDLE_WITH_MKLML
@@ -169,18 +159,8 @@ struct CBlas<float> {
   }
 
   template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vsSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vsMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vsDiv(args...);
   }
 
   template <typename... ARGS>
@@ -290,18 +270,8 @@ struct CBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vdSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vdMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vdDiv(args...);
   }
 
   template <typename... ARGS>
@@ -363,30 +333,12 @@ struct CBlas<phi::complex64> {
   // so replace with the raw operator methods
   /*
   template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vcSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vcMul(args...);
   }
 
   template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vcDiv(args...);
-  }
   */
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
 
   template <typename... ARGS>
   static void VMUL(int n,
@@ -397,16 +349,6 @@ struct CBlas<phi::complex64> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -546,30 +488,12 @@ struct CBlas<phi::complex128> {
   // so replace with the raw operator methods
   /*
   template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vzSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vzMul(args...);
   }
 
   template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vzDiv(args...);
-  }
   */
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
 
   template <typename... ARGS>
   static void VMUL(int n,
@@ -580,16 +504,6 @@ struct CBlas<phi::complex128> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -756,18 +670,8 @@ struct CBlas<float> {
   }
 
   template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vsSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vsMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vsDiv(args...);
   }
 
   template <typename... ARGS>
@@ -834,18 +738,8 @@ struct CBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vdSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vdMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vdDiv(args...);
   }
 
   template <typename... ARGS>
@@ -892,16 +786,6 @@ struct CBlas<phi::complex64> {
   }
 
   template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
-
-  template <typename... ARGS>
   static void VMUL(int n,
                    const phi::complex64 *a,
                    const phi::complex64 *b,
@@ -910,16 +794,6 @@ struct CBlas<phi::complex64> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -1055,16 +929,6 @@ struct CBlas<phi::complex128> {
   }
 
   template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
-
-  template <typename... ARGS>
   static void VMUL(int n,
                    const phi::complex128 *a,
                    const phi::complex128 *b,
@@ -1073,16 +937,6 @@ struct CBlas<phi::complex128> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -1694,19 +1548,6 @@ void Blas<CPUContext>::VCOPY(int n, const T *x, T *y) const {
 
 template <>
 template <typename T>
-void Blas<CPUContext>::VSUB(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VSUB(n, x, y, z);
-#else
-  // try to find if openblas support vsub
-  for (int i = 0; i < n; ++i) {
-    z[i] = x[i] - y[i];
-  }
-#endif
-}
-
-template <>
-template <typename T>
 void Blas<CPUContext>::VMUL(int n, const T *x, const T *y, T *z) const {
 #if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
   CBlas<T>::VMUL(n, x, y, z);
@@ -1714,19 +1555,6 @@ void Blas<CPUContext>::VMUL(int n, const T *x, const T *y, T *z) const {
   // try to find if openblas support vmul
   for (int i = 0; i < n; ++i) {
     z[i] = x[i] * y[i];
-  }
-#endif
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VDIV(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VDIV(n, x, y, z);
-#else
-  // try to find if openblas support vdiv
-  for (int i = 0; i < n; ++i) {
-    z[i] = x[i] / y[i];
   }
 #endif
 }
