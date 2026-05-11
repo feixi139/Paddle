@@ -281,8 +281,10 @@ void BatchCompute(const Context &dev_ctx,
     prev_c_data = reordered_c0_data;
     size_t sz = D;
     for (int i = 0; i < max_bs; ++i) {
-      blas.VCOPY(sz, h0_data + seq_order[i] * D, reordered_h0_data);
-      blas.VCOPY(sz, c0_data + seq_order[i] * D, reordered_c0_data);
+      std::memcpy(
+          reordered_h0_data, h0_data + seq_order[i] * D, sz * sizeof(T));
+      std::memcpy(
+          reordered_c0_data, c0_data + seq_order[i] * D, sz * sizeof(T));
       reordered_h0_data += D;
       reordered_c0_data += D;
     }

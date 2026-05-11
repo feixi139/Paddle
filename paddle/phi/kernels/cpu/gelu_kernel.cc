@@ -65,7 +65,11 @@ struct GeluFunctor {
       for (int i = 0; i < n; i++) {
         out_data[i] += static_cast<T>(1);
       }
-      funcs::CBlas<T>::VMUL(n, x_data, out_data, out_data);
+      {
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> out_map(out_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(x_data, n);
+        out_map = x_map.array() * out_map.array();
+      }
       for (int i = 0; i < n; i++) {
         out_data[i] *= static_cast<T>(0.5);
       }

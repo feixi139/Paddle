@@ -215,10 +215,28 @@ void AttentionLSTMKernel(const Context& dev_ctx,
       act_cand(D, lstm_out_data + D3, lstm_out_data + D3);
 
       // a = forget * prev_cell
-      blas.VMUL(D, lstm_out_data, prev_cell_data, lstm_out_data);
+      {
+        int n = D;
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> dst_map(lstm_out_data,
+                                                                n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> a_map(
+            lstm_out_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> b_map(
+            prev_cell_data, n);
+        dst_map = a_map.array() * b_map.array();
+      }
 
       // b = input * tilde
-      blas.VMUL(D, lstm_out_data + D, lstm_out_data + D3, lstm_out_data + D);
+      {
+        int n = D;
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> dst_map(
+            lstm_out_data + D, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> a_map(
+            lstm_out_data + D, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> b_map(
+            lstm_out_data + D3, n);
+        dst_map = a_map.array() * b_map.array();
+      }
 
       // cell_out = a + b
       {
@@ -234,7 +252,16 @@ void AttentionLSTMKernel(const Context& dev_ctx,
 
       // state act tanh(cell_out) * output_gate
       act_cell(D, cur_cell_out_data, lstm_out_data);
-      blas.VMUL(D, lstm_out_data, lstm_out_data + D2, cur_hidden_out_data);
+      {
+        int n = D;
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> dst_map(
+            cur_hidden_out_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> a_map(
+            lstm_out_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> b_map(
+            lstm_out_data + D2, n);
+        dst_map = a_map.array() * b_map.array();
+      }
 
       prev_hidden_data = cur_hidden_out_data;
       prev_cell_data = cur_cell_out_data;

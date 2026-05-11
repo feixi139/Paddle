@@ -329,7 +329,7 @@ class SumSeqPoolGradFunctor {
       const T* out_pos = out_g_data + i * out_w;
       T* in_pos = in_g_data + in_offset;
       for (int r = 0; r != h; ++r) {
-        blas.VCOPY(in_w, out_pos, in_pos + r * in_w);
+        std::memcpy(in_pos + r * in_w, out_pos, in_w * sizeof(T));
       }
     }
   }

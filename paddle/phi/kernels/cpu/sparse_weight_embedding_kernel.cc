@@ -64,15 +64,9 @@ struct EmbeddingCPUSparseFunctor {
             common::errors::InvalidArgument(
                 "the input key should be exists. But received %d.", id_index));
 
-        if (input_data_type == DataType::BFLOAT16) {
-          memcpy(output + i * row_width,
-                 table + id_index * row_width,
-                 row_width * sizeof(T));
-        } else {
-          auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx_);
-          blas.VCOPY(
-              row_width, table + id_index * row_width, output + i * row_width);
-        }
+        memcpy(output + i * row_width,
+               table + id_index * row_width,
+               row_width * sizeof(T));
       }
     }
   }

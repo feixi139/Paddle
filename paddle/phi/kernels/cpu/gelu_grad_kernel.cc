@@ -119,7 +119,14 @@ struct GeluGradFunctor {
       //     first[i] = first[i] + second[i];
       //   }
 
-      funcs::CBlas<T>::VMUL(n, dout_data, first, dx_data);
+      {
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> dx_map(dx_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> dout_map(
+            dout_data, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> first_map(first,
+                                                                        n);
+        dx_map = dout_map.array() * first_map.array();
+      }
 
       std::free(first);
       std::free(second);

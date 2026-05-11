@@ -90,13 +90,14 @@ ElementwiseAddGrad(const CPUContext& dev_ctx,
                    DenseTensor* dx,
                    DenseTensor* dy,
                    int axis = -1) {
-  auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
   if (dx) {
-    blas.VCOPY(dout.numel(), dout.data<T>(), dev_ctx.template Alloc<T>(dx));
+    auto* dx_data = dev_ctx.template Alloc<T>(dx);
+    std::memcpy(dx_data, dout.data<T>(), dout.numel() * sizeof(T));
   }
 
   if (dy) {
-    blas.VCOPY(dout.numel(), dout.data<T>(), dev_ctx.template Alloc<T>(dy));
+    auto* dy_data = dev_ctx.template Alloc<T>(dy);
+    std::memcpy(dy_data, dout.data<T>(), dout.numel() * sizeof(T));
   }
 }
 

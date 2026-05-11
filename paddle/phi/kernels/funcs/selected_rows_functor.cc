@@ -278,7 +278,7 @@ struct SelectedRowsSumTo<CPUContext, T> {
       auto& in_value = input1[i]->value();
       const auto* in_data = in_value.data<T>();
       offset += input2_offsets[i];
-      blas.VCOPY(in_value.numel(), in_data, in2_data + offset);
+      std::memcpy(in2_data + offset, in_data, in_value.numel() * sizeof(T));
     }
   }
 };

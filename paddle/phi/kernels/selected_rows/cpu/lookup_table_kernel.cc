@@ -72,18 +72,9 @@ void LookupTableKernel(const Context &dev_ctx,
         auto id_index = table_t.GetIndexFromId(ids[i]);
 
         if (id_index != -1) {
-          if (input_data_type == phi::DataType::INT8 ||
-              input_data_type == phi::DataType::INT16 ||
-              input_data_type == phi::DataType::BFLOAT16) {
-            memcpy(output + i * row_width,
-                   table + id_index * row_width,
-                   row_width * sizeof(T));
-          } else {
-            auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
-            blas.VCOPY(row_width,
-                       table + id_index * row_width,
-                       output + i * row_width);
-          }
+          memcpy(output + i * row_width,
+                 table + id_index * row_width,
+                 row_width * sizeof(T));
         } else {
           memset(output + i * row_width, 0, row_width * sizeof(T));
         }
@@ -101,17 +92,9 @@ void LookupTableKernel(const Context &dev_ctx,
             common::errors::InvalidArgument(
                 "the input key should be exists. But received %d.", id_index));
 
-        if (input_data_type == phi::DataType::INT8 ||
-            input_data_type == phi::DataType::INT16 ||
-            input_data_type == phi::DataType::BFLOAT16) {
-          memcpy(output + i * row_width,
-                 table + id_index * row_width,
-                 row_width * sizeof(T));
-        } else {
-          auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
-          blas.VCOPY(
-              row_width, table + id_index * row_width, output + i * row_width);
-        }
+        memcpy(output + i * row_width,
+               table + id_index * row_width,
+               row_width * sizeof(T));
       }
     }
   }
