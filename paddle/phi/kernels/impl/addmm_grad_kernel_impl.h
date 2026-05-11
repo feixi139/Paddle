@@ -14,11 +14,13 @@ limitations under the License. */
 
 #pragma once
 
+#include <cstring>
 #include <type_traits>
 
 #include "glog/logging.h"
 
 #include "paddle/phi/common/amp_type_traits.h"
+#include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/kernels/addmm_grad_kernel.h"
 #include "paddle/phi/kernels/full_kernel.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
@@ -154,8 +156,11 @@ void AddmmGradKernel(const Context& dev_ctx,
     } else {
       // The VCOPY does not support the float16, bfloat16
       if (!is_float16_or_bfloat16 && !is_big_tensor) {
-        mt_blas.VCOPY(
-            total_elems, out_grad.data<MPType>(), input_grad->data<MPType>());
+        memory_utils::Copy(dev_ctx.GetPlace(),
+                           input_grad->data<MPType>(),
+                           dev_ctx.GetPlace(),
+                           out_grad.data<MPType>(),
+                           total_elems * sizeof(MPType));
       } else {
         funcs::ForRange<Context> for_range(dev_ctx, total_elems);
         CopyOrScaleFunctor<T> functor(

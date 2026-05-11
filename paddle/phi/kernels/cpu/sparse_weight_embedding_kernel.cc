@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstring>
+
 #include "paddle/phi/backends/cpu/cpu_context.h"
 #include "paddle/phi/common/data_type.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/core/utils/data_type.h"
 #include "paddle/phi/kernels/embedding_kernel.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/embedding_util.h"
 
 namespace phi {
@@ -69,9 +70,9 @@ struct EmbeddingCPUSparseFunctor {
                  table + id_index * row_width,
                  row_width * sizeof(T));
         } else {
-          auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx_);
-          blas.VCOPY(
-              row_width, table + id_index * row_width, output + i * row_width);
+          std::memcpy(output + i * row_width,
+                      table + id_index * row_width,
+                      row_width * sizeof(T));
         }
       }
     }

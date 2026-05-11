@@ -54,9 +54,6 @@ struct CUBlas<float> {
   }
 
   template <typename... ARGS>
-  static void VCOPY(ARGS... args) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasScopy(args...));
-  }
 
   template <typename... ARGS>
   static void GEMV(ARGS... args) {
@@ -237,9 +234,6 @@ struct CUBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VCOPY(ARGS... args) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasDcopy(args...));
-  }
 
   template <typename... ARGS>
   static void GEMV(ARGS... args) {
@@ -2393,10 +2387,6 @@ void Blas<phi::GPUContext>::SCAL(int n, const T alpha, T *x) const {
 
 template <>
 template <typename T>
-void Blas<phi::GPUContext>::VCOPY(int n, const T *x, T *y) const {
-  dev_ctx_.CublasCall(
-      [&](cublasHandle_t handle) { CUBlas<T>::VCOPY(handle, n, x, 1, y, 1); });
-}
 
 template <>
 template <typename T>

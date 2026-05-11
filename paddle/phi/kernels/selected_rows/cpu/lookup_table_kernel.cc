@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/core/enforce.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/eigen/common.h"
 #include "paddle/phi/kernels/funcs/selected_rows_functor.h"
 
@@ -79,10 +79,9 @@ void LookupTableKernel(const Context &dev_ctx,
                    table + id_index * row_width,
                    row_width * sizeof(T));
           } else {
-            auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
-            blas.VCOPY(row_width,
-                       table + id_index * row_width,
-                       output + i * row_width);
+            std::memcpy(output + i * row_width,
+                        table + id_index * row_width,
+                        row_width * sizeof(T));
           }
         } else {
           memset(output + i * row_width, 0, row_width * sizeof(T));
@@ -108,9 +107,9 @@ void LookupTableKernel(const Context &dev_ctx,
                  table + id_index * row_width,
                  row_width * sizeof(T));
         } else {
-          auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
-          blas.VCOPY(
-              row_width, table + id_index * row_width, output + i * row_width);
+          std::memcpy(output + i * row_width,
+                      table + id_index * row_width,
+                      row_width * sizeof(T));
         }
       }
     }

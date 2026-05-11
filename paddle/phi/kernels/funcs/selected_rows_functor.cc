@@ -12,6 +12,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License. */
 #include <algorithm>
+#include <cstring>
 #include <map>
 #include <set>
 #include <vector>
@@ -272,13 +273,12 @@ struct SelectedRowsSumTo<CPUContext, T> {
 
     auto* in2_value = input2->mutable_value();
     auto* in2_data = in2_value->data<T>();
-    auto blas = phi::funcs::GetBlas<CPUContext, T>(dev_ctx);
     size_t offset = 0u;
     for (size_t i = 0u; i != input1.size(); ++i) {
       auto& in_value = input1[i]->value();
       const auto* in_data = in_value.data<T>();
       offset += input2_offsets[i];
-      blas.VCOPY(in_value.numel(), in_data, in2_data + offset);
+      std::memcpy(in2_data + offset, in_data, in_value.numel() * sizeof(T));
     }
   }
 };

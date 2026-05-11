@@ -15,6 +15,7 @@ limitations under the License. */
 #include "paddle/phi/kernels/sparse/addmm_grad_kernel.h"
 
 #include "paddle/phi/backends/gpu/gpu_context.h"
+#include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/empty_kernel.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
@@ -39,11 +40,21 @@ void AddmmCooDenseGradKernel(const Context& dev_ctx,
     dinput->Resize(input.dims());
     dev_ctx.template Alloc<T>(dinput);
 
-    blas.VCOPY(input.numel(), dout.data<T>(), dinput->data<T>());
+    memory_utils::Copy(dev_ctx.GetPlace(),
+                       dinput->data<T>(),
+                       dev_ctx.GetPlace(),
+                       dout.data<T>(),
+                       input.numel() * sizeof(T),
+                       dev_ctx.stream());
     blas.SCAL(input.numel(), beta, dinput->data<T>());
   }
   DenseTensor dout_scale = EmptyLike<T, Context>(dev_ctx, dout);
-  blas.VCOPY(dout.numel(), dout.data<T>(), dout_scale.data<T>());
+  memory_utils::Copy(dev_ctx.GetPlace(),
+                     dout_scale.data<T>(),
+                     dev_ctx.GetPlace(),
+                     dout.data<T>(),
+                     dout.numel() * sizeof(T),
+                     dev_ctx.stream());
   blas.SCAL(dout.numel(), alpha, dout_scale.data<T>());
   MatmulCooDenseGradKernel<T, Context>(dev_ctx, x, y, dout_scale, dx, dy);
 }
@@ -65,11 +76,21 @@ void AddmmCsrDenseGradKernel(const Context& dev_ctx,
     dinput->Resize(input.dims());
     dev_ctx.template Alloc<T>(dinput);
 
-    blas.VCOPY(input.numel(), dout.data<T>(), dinput->data<T>());
+    memory_utils::Copy(dev_ctx.GetPlace(),
+                       dinput->data<T>(),
+                       dev_ctx.GetPlace(),
+                       dout.data<T>(),
+                       input.numel() * sizeof(T),
+                       dev_ctx.stream());
     blas.SCAL(input.numel(), beta, dinput->data<T>());
   }
   DenseTensor dout_scale = EmptyLike<T, Context>(dev_ctx, dout);
-  blas.VCOPY(dout.numel(), dout.data<T>(), dout_scale.data<T>());
+  memory_utils::Copy(dev_ctx.GetPlace(),
+                     dout_scale.data<T>(),
+                     dev_ctx.GetPlace(),
+                     dout.data<T>(),
+                     dout.numel() * sizeof(T),
+                     dev_ctx.stream());
   blas.SCAL(dout.numel(), alpha, dout_scale.data<T>());
   MatmulCsrDenseGradKernel<T, Context>(dev_ctx, x, y, dout_scale, dx, dy);
 }

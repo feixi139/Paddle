@@ -21,8 +21,6 @@
 
 #include "paddle/phi/backends/cpu/cpu_context.h"
 #include "paddle/phi/core/kernel_registry.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
-#include "paddle/phi/kernels/funcs/blas/blas_impl.h"
 #include "paddle/phi/kernels/funcs/eigen/common.h"
 #include "paddle/phi/kernels/funcs/eigen/eigen_function.h"
 
@@ -51,25 +49,6 @@ struct GeluFunctor {
         out.device(d) = x * static_cast<T>(0.5) * (static_cast<T>(1) + temp);
       }
     } else {
-#if defined(PADDLE_WITH_MKLML) && !defined(_WIN32) && !defined(__APPLE__) && \
-    !defined(__OSX__) && !defined(PADDLE_WITH_CUDA) &&                       \
-    !defined(PADDLE_WITH_HIP)
-      auto x_data = x.data();
-      auto out_data = out.data();
-      int n = std::min(x.size(), out.size());
-
-      std::memset(out_data, 0, n * sizeof(T));
-      funcs::CBlas<T>::AXPY(
-          n, static_cast<T>(M_SQRT1_2), x_data, 1, out_data, 1);
-      funcs::CBlas<T>::VMERF(n, out_data, out_data, VML_LA);
-      for (int i = 0; i < n; i++) {
-        out_data[i] += static_cast<T>(1);
-      }
-      funcs::CBlas<T>::VMUL(n, x_data, out_data, out_data);
-      for (int i = 0; i < n; i++) {
-        out_data[i] *= static_cast<T>(0.5);
-      }
-#else
       // gelu(x) = 0.5 * x *  (1 + erf(x / sqrt(2)))
       if (std::is_same<T, dtype::float16>::value) {
         VLOG(4) << "cast from float16 to float before computing";
@@ -82,7 +61,6 @@ struct GeluFunctor {
         auto temp = (x * static_cast<T>(M_SQRT1_2)).erf();
         out.device(d) = x * static_cast<T>(0.5) * (static_cast<T>(1) + temp);
       }
-#endif
     }
   }
 };
