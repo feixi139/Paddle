@@ -164,26 +164,6 @@ struct CBlas<float> {
   }
 
   template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vsExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vsSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vsPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vsInv(args...);
-  }
-
-  template <typename... ARGS>
   static void VMERF(ARGS... args) {
     phi::dynload::vmsErf(args...);
   }
@@ -272,26 +252,6 @@ struct CBlas<double> {
   template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vdMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vdExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vdSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vdPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vdInv(args...);
   }
 
   template <typename... ARGS>
@@ -673,26 +633,6 @@ struct CBlas<float> {
   static void VMUL(ARGS... args) {
     phi::dynload::vsMul(args...);
   }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vsExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vsSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vsPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vsInv(args...);
-  }
 };
 
 template <>
@@ -740,26 +680,6 @@ struct CBlas<double> {
   template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vdMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vdExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vdSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vdPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vdInv(args...);
   }
 
   template <typename... ARGS>
@@ -1265,18 +1185,6 @@ struct CBlas<phi::float16> {
     PADDLE_THROW(common::errors::Unimplemented(
         "float16 VMUL not supported on CPU, please check your code"));
   }
-  static void VEXP(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 VEXP not supported on CPU, please check your code"));
-  }
-  static void VSQUARE(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 VSQUARE not supported on CPU, please check your code"));
-  }
-  static void VPOW(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 VPOW not supported on CPU, please check your code"));
-  }
   static void DOT(...) {
     PADDLE_THROW(common::errors::Unimplemented(
         "float16 DOT not supported on CPU, please check your code"));
@@ -1555,43 +1463,6 @@ void Blas<CPUContext>::VMUL(int n, const T *x, const T *y, T *z) const {
   // try to find if openblas support vmul
   for (int i = 0; i < n; ++i) {
     z[i] = x[i] * y[i];
-  }
-#endif
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VEXP(int n, const T *x, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VEXP(n, x, y);
-#else
-  // try to find if openblas support vexp
-  for (int i = 0; i < n; ++i) {
-    y[i] = std::exp(x[i]);
-  }
-#endif
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VSQUARE(int n, const T *x, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VSQUARE(n, x, y);
-#else
-  for (int i = 0; i < n; ++i) {
-    y[i] = x[i] * x[i];
-  }
-#endif
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VPOW(int n, const T *x, T a, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VPOW(n, x, a, y);
-#else
-  for (int i = 0; i < n; ++i) {
-    y[i] = std::pow(x[i], a);
   }
 #endif
 }
@@ -2532,18 +2403,6 @@ void Blas<DeviceContext>::MatMulWithHead(const DenseTensor &mat_a,
   }
 }
 #endif  // @} End Group Blas HML: MatMulWithHead
-
-template <typename DeviceContext>
-template <typename T>
-void Blas<DeviceContext>::VINV(int n, const T *a, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VINV(n, a, y);
-#else
-  for (int i = 0; i < n; ++i) {
-    y[i] = 1.0 / a[i];
-  }
-#endif
-}
 
 template <>
 template <typename T>

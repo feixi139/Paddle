@@ -84,12 +84,13 @@ struct GeluGradFunctor {
       funcs::CBlas<T>::SCAL(n, static_cast<T>(0.5), first, 1);
 
       // second = (0.5 * 2/sqrt(pi) * 1/sqrt(2) * x * exp(-0.5 * x^2))
-      funcs::CBlas<T>::VSQUARE(n, x_data, second);
-      funcs::CBlas<T>::SCAL(n, -static_cast<T>(0.5), second, 1);
-      funcs::CBlas<T>::VEXP(n, second, second);
-      funcs::CBlas<T>::VMUL(n, x_data, second, second);
-      funcs::CBlas<T>::SCAL(
-          n, static_cast<T>(0.5 * M_2_SQRTPI * M_SQRT1_2), second, 1);
+      {
+        Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> sec_map(second, n);
+        Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(x_data, n);
+        sec_map = (x_map.cwiseAbs2() * static_cast<T>(-0.5)).array().exp() *
+                  x_map.array();
+        sec_map *= static_cast<T>(0.5 * M_2_SQRTPI * M_SQRT1_2);
+      }
 
       // dx = dout * (first + second);
       // original: funcs::CBlas<T>::VADD(n, first, second, first);
