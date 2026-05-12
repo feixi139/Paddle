@@ -390,9 +390,6 @@ class Blas {
               T beta) const;
 
   template <typename T>
-  void VMERF(int n, const T* a, T* y, int64_t mode) const;
-
-  template <typename T>
   void TRSM(CBLAS_SIDE side,
             CBLAS_UPLO uplo,
             CBLAS_TRANSPOSE transA,
@@ -544,11 +541,6 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void BatchedGEMM(ARGS... args) const {
     Base()->template BatchedGEMM<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VMERF(ARGS... args) const {
-    Base()->template VMERF<T>(args...);
   }
 
   template <typename... ARGS>

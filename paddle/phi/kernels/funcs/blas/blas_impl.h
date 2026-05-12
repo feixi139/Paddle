@@ -124,10 +124,6 @@ struct CBlas<float> {
     phi::dynload::cblas_sgemm_batch(args...);
   }
 
-  template <typename... ARGS>
-  static void VMERF(ARGS... args) {
-    phi::dynload::vmsErf(args...);
-  }
 #if !defined(_WIN32)
   template <typename... ARGS>
   static void CSRMM(ARGS... args) {
@@ -205,10 +201,6 @@ struct CBlas<double> {
     phi::dynload::cblas_dgemm_batch(args...);
   }
 
-  template <typename... ARGS>
-  static void VMERF(ARGS... args) {
-    phi::dynload::vmdErf(args...);
-  }
 #if !defined(_WIN32)
   template <typename... ARGS>
   static void CSRMM(ARGS... args) {
@@ -2227,18 +2219,6 @@ void Blas<DeviceContext>::MatMulWithHead(const DenseTensor &mat_a,
   }
 }
 #endif  // @} End Group Blas HML: MatMulWithHead
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VMERF(int n, const T *a, T *y, int64_t mode) const {
-#ifdef PADDLE_WITH_MKLML
-  CBlas<T>::VMERF(n, a, y, mode);
-#else
-  for (int i = 0; i < n; ++i) {
-    y[i] = std::erf(a[i]);
-  }
-#endif
-}
 
 #ifdef PADDLE_WITH_MKLML
 template <>
