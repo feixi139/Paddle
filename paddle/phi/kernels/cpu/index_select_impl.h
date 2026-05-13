@@ -47,8 +47,11 @@ struct IndexSelectAdd<
                   const T* src_pointer,
                   const T* p_pointer,
                   T* dist_pointer) {
-    auto blas = funcs::GetBlas<Context, T>(dev_ctx);
-    blas.VADD(slice_size, src_pointer, p_pointer, dist_pointer);
+    auto n = slice_size;
+    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> z_map(dist_pointer, n);
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(src_pointer, n);
+    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> y_map(p_pointer, n);
+    z_map = x_map + y_map;
   }
 };
 

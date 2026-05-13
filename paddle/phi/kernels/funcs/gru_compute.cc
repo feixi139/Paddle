@@ -14,8 +14,17 @@ limitations under the License. */
 #include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/detail/gru_cpu_kernel.h"
 #include "paddle/phi/kernels/funcs/detail/gru_kernel.h"
+#include "paddle/phi/kernels/funcs/eigen/common.h"
 
 namespace phi::funcs {
+
+template <typename T>
+inline void EigenVecAdd(int n, const T *x, const T *y, T *z) {
+  Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> z_map(z, n);
+  Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(x, n);
+  Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> y_map(y, n);
+  z_map = x_map + y_map;
+}
 
 template <typename T>
 struct GRUUnitFunctor<CPUContext, T> {
@@ -207,7 +216,7 @@ struct GRUUnitFunctorV2<CPUContext, T> {
     T *cell_state_value = value.gate_value + 2 * frame_size;
     T *reset_output_value = value.reset_output_value;
     for (int b = 0; b < batch_size; ++b) {
-      blas.VADD(
+      EigenVecAdd<T>(
           frame_size, cell_state_value, reset_output_value, cell_state_value);
       cell_state_value += frame_size * 3;
       reset_output_value += frame_size;
@@ -339,8 +348,8 @@ struct GRUUnitGradFunctorV2<CPUContext, T> {
     T *state_bias_grad = grad.bias_hh_grad + 2 * frame_size;
     T *reset_output_grad = grad.reset_output_grad;
     for (int b = 0; b < batch_size; ++b) {
-      blas.VADD(2 * frame_size, bias_hh_grad, gate_grad, bias_hh_grad);
-      blas.VADD(
+      EigenVecAdd<T>(2 * frame_size, bias_hh_grad, gate_grad, bias_hh_grad);
+      EigenVecAdd<T>(
           frame_size, state_bias_grad, reset_output_grad, state_bias_grad);
       gate_grad += 3 * frame_size;
       reset_output_grad += frame_size;

@@ -70,33 +70,37 @@ struct GeluGradFunctor {
       auto dout_data = dout.data();
       int n = std::min(x.size(), dx.size());
 
-      auto first = static_cast<T*>(std::malloc(n * sizeof(T)));
-      std::memset(first, 0, n * sizeof(T));
-      auto second = static_cast<T*>(std::malloc(n * sizeof(T)));
-      std::memset(second, 0, n * sizeof(T));
+      auto erf_term = static_cast<T*>(std::malloc(n * sizeof(T)));
+      std::memset(erf_term, 0, n * sizeof(T));
+      auto exp_term = static_cast<T*>(std::malloc(n * sizeof(T)));
+      std::memset(exp_term, 0, n * sizeof(T));
 
-      // first = (0.5 * (1 + erf(x / sqrt(2))))
-      funcs::CBlas<T>::AXPY(n, static_cast<T>(M_SQRT1_2), x_data, 1, first, 1);
-      funcs::CBlas<T>::VMERF(n, first, first, VML_LA);
+      // erf_term = 0.5 * (1 + erf(x / sqrt(2)))
+      funcs::CBlas<T>::AXPY(
+          n, static_cast<T>(M_SQRT1_2), x_data, 1, erf_term, 1);
+      funcs::CBlas<T>::VMERF(n, erf_term, erf_term, VML_LA);
       for (int i = 0; i < n; i++) {
-        first[i] += static_cast<T>(1);
+        erf_term[i] += static_cast<T>(1);
       }
-      funcs::CBlas<T>::SCAL(n, static_cast<T>(0.5), first, 1);
+      funcs::CBlas<T>::SCAL(n, static_cast<T>(0.5), erf_term, 1);
 
-      // second = (0.5 * 2/sqrt(pi) * 1/sqrt(2) * x * exp(-0.5 * x^2))
-      funcs::CBlas<T>::VSQUARE(n, x_data, second);
-      funcs::CBlas<T>::SCAL(n, -static_cast<T>(0.5), second, 1);
-      funcs::CBlas<T>::VEXP(n, second, second);
-      funcs::CBlas<T>::VMUL(n, x_data, second, second);
-      funcs::CBlas<T>::SCAL(
-          n, static_cast<T>(0.5 * M_2_SQRTPI * M_SQRT1_2), second, 1);
+      // exp_term = 0.5 * sqrt(2/pi) * x * exp(-0.5 * x^2)
+      Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> exp_map(exp_term, n);
+      Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> x_map(x_data, n);
+      exp_map = (x_map.cwiseAbs2() * static_cast<T>(-0.5)).array().exp() *
+                x_map.array();
+      exp_map *= static_cast<T>(0.5 * M_2_SQRTPI * M_SQRT1_2);
 
-      // dx = dout * (first + second);
-      funcs::CBlas<T>::VADD(n, first, second, first);
-      funcs::CBlas<T>::VMUL(n, dout_data, first, dx_data);
+      // dx = dout * (erf_term + exp_term)
+      Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> dx_map(dx_data, n);
+      Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> dout_map(dout_data,
+                                                                     n);
+      Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> erf_map(erf_term,
+                                                                    n);
+      dx_map = dout_map.array() * (erf_map.array() + exp_map.array());
 
-      std::free(first);
-      std::free(second);
+      std::free(erf_term);
+      std::free(exp_term);
 #else
       // gelu_grad(x) = dout * 0.5 * (1 + erf(x / sqrt(2)) + x * sqrt(2 / pi) *
       // exp(- x^2 / 2)

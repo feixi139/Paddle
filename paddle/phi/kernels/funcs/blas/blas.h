@@ -264,28 +264,10 @@ class Blas {
   void AXPY(int n, T alpha, const T* x, T* y) const;
 
   template <typename T>
-  void VADD(int n, const T* x, const T* y, T* z) const;
-
-  template <typename T>
-  void VSUB(int n, const T* x, const T* y, T* z) const;
-
-  template <typename T>
   void VMUL(int n, const T* x, const T* y, T* z) const;
 
   template <typename T>
-  void VDIV(int n, const T* x, const T* y, T* z) const;
-
-  template <typename T>
   void VCOPY(int n, const T* x, T* y) const;
-
-  template <typename T>
-  void VEXP(int n, const T* x, T* y) const;
-
-  template <typename T>
-  void VSQUARE(int n, const T* x, T* y) const;
-
-  template <typename T>
-  void VPOW(int n, const T* x, T alpha, T* y) const;
 
   template <typename T>
   void GEMV(bool trans_a,
@@ -412,9 +394,6 @@ class Blas {
               T alpha,
               T* mat_out,
               T beta) const;
-
-  template <typename T>
-  void VINV(int n, const T* a, T* y) const;
 
   template <typename T>
   void VMERF(int n, const T* a, T* y, int64_t mode) const;
@@ -544,43 +523,13 @@ class BlasT : private Blas<DeviceContext> {
   }
 
   template <typename... ARGS>
-  void VADD(ARGS... args) const {
-    Base()->template VADD<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VSUB(ARGS... args) const {
-    Base()->template VSUB<T>(args...);
-  }
-
-  template <typename... ARGS>
   void VMUL(ARGS... args) const {
     Base()->template VMUL<T>(args...);
   }
 
   template <typename... ARGS>
-  void VDIV(ARGS... args) const {
-    Base()->template VDIV<T>(args...);
-  }
-
-  template <typename... ARGS>
   void VCOPY(ARGS... args) const {
     Base()->template VCOPY<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VEXP(ARGS... args) const {
-    Base()->template VEXP<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VSQUARE(ARGS... args) const {
-    Base()->template VSQUARE<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VPOW(ARGS... args) const {
-    Base()->template VPOW<T>(args...);
   }
 
   template <typename... ARGS>
@@ -611,11 +560,6 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void BatchedGEMM(ARGS... args) const {
     Base()->template BatchedGEMM<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VINV(ARGS... args) const {
-    Base()->template VINV<T>(args...);
   }
 
   template <typename... ARGS>
