@@ -68,12 +68,14 @@ void HSigmoidLossGradKernelImpl(const Context& dev_ctx,
 
   auto* pre_out_grad_data = pre_out_grad.data<T>();
   auto* pre_out_data = pre_out.template data<T>();
-  auto n = pre_out.numel();
-  blas.VEXP(n, pre_out_data, pre_out_grad_data);
-  blas.VINV(n, pre_out_grad_data, pre_out_grad_data);
-  for (int64_t i = 0; i < n; ++i) {
-    pre_out_grad_data[i] = 1.0 - pre_out_grad_data[i];
-  }
+  auto numel = pre_out.numel();
+  // softrelu derivative: 1 - 1/exp(pre_out)
+  Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>> pre_out_grad_map(
+      pre_out_grad_data, numel);
+  Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>> pre_out_map(
+      pre_out_data, numel);
+  pre_out_grad_map =
+      static_cast<T>(1) - pre_out_map.array().exp().cwiseInverse();
   bit_code->Sub(&pre_out_grad);  // the gradient of clip(w * x + b)
   auto* out_grad_data = out_grad.template data<T>();
 
