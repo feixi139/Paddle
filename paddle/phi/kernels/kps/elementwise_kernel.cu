@@ -49,6 +49,26 @@ void MultiplyKernel(const Context& dev_ctx,
   phi::MultiplyRawKernel<T, Context>(dev_ctx, x, y, -1, out);
 }
 
+// Complex * Real forward overload.
+// T must be a complex type (complex64 or complex128).
+// x is complex, y is real, out is complex.
+template <typename T, typename Context>
+void MultiplyComplexRealKernel(const Context& dev_ctx,
+                               const DenseTensor& x,
+                               const DenseTensor& y,
+                               int axis,
+                               DenseTensor* out) {
+  if (x.numel() == 0 || y.numel() == 0) {
+    dev_ctx.template Alloc<T>(out);
+    return;
+  }
+  std::vector<const DenseTensor*> inputs = {&x, &y};
+  std::vector<DenseTensor*> outputs = {out};
+  dev_ctx.template Alloc<T>(out);
+  funcs::BroadcastKernel<T>(
+      dev_ctx, inputs, &outputs, funcs::ComplexMulRealFunctor<T>(), axis);
+}
+
 template <typename T, typename Context>
 void DivideKernel(const Context& dev_ctx,
                   const DenseTensor& x,

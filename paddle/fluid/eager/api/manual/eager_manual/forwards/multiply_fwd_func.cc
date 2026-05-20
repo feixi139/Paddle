@@ -21,9 +21,15 @@
 #include "paddle/fluid/eager/type_promotion_utils.h"
 #include "paddle/fluid/imperative/amp_utils.h"
 #include "paddle/phi/api/include/sparse_api.h"
+#include "paddle/phi/backends/context_pool.h"
 #include "paddle/phi/common/place.h"
 #include "paddle/phi/common/type_promotion.h"
+#include "paddle/phi/core/compat/convert_utils.h"
+#include "paddle/phi/core/kernel_factory.h"
 #include "paddle/phi/core/platform/profiler/event_tracing.h"
+#include "paddle/phi/core/utils/data_type.h"
+#include "paddle/phi/infermeta/binary.h"
+#include "paddle/phi/kernels/complex_mul_real_kernel.h"
 
 COMMON_DECLARE_bool(check_nan_inf);
 COMMON_DECLARE_bool(check_cuda_error);
@@ -78,6 +84,83 @@ paddle::Tensor multiply_ad_func(
           paddle::imperative::AmpLevel::O0);
       return multiply_ad_func(new_x, new_y);
     }
+  }
+
+  // Complex * Real fast path: avoid type promotion, use specialized kernel
+  // Only available on GPU where the kernel is registered
+  if (phi::is_gpu_place(x.place()) &&
+      ((phi::IsComplexType(x.dtype()) &&
+        (y.dtype() == phi::DataType::FLOAT32 ||
+         y.dtype() == phi::DataType::FLOAT64)) ||
+       ((x.dtype() == phi::DataType::FLOAT32 ||
+         x.dtype() == phi::DataType::FLOAT64) &&
+        phi::IsComplexType(y.dtype())))) {
+    // Normalize so that complex is always the first argument
+    const paddle::Tensor& cx = phi::IsComplexType(x.dtype()) ? x : y;
+    const paddle::Tensor& ry = phi::IsComplexType(x.dtype()) ? y : x;
+
+    // Get DenseTensors
+    auto* x_dense = static_cast<phi::DenseTensor*>(cx.impl().get());
+    auto* y_dense = static_cast<phi::DenseTensor*>(ry.impl().get());
+
+    // Get device context
+    auto* dev_ctx = phi::DeviceContextPool::Instance().Get(cx.place());
+
+    // Create output tensor
+    paddle::Tensor out_tmp;
+    paddle::Tensor& out_tensor = predefined_out ? **predefined_out : out_tmp;
+    auto out_dense = std::make_shared<phi::DenseTensor>();
+    phi::MetaTensor meta_out(out_dense.get());
+    phi::ElementwiseInferMeta(
+        phi::MetaTensor(*x_dense), phi::MetaTensor(*y_dense), &meta_out);
+    out_tensor.set_impl(out_dense);
+
+    // Dispatch kernel by dtype and backend
+    auto kernel_result =
+        phi::KernelFactory::Instance().SelectKernelOrThrowError(
+            "complex_mul_real",
+            {phi::TransToPhiBackend(cx.place()),
+             phi::DataLayout::ALL_LAYOUT,
+             cx.dtype()});
+    const auto& kernel = kernel_result.kernel;
+    using kernel_signature = void (*)(const phi::DeviceContext&,
+                                      const phi::DenseTensor&,
+                                      const phi::DenseTensor&,
+                                      phi::DenseTensor*);
+    auto* kernel_fn = kernel.GetVariadicKernelFn<kernel_signature>();
+    (*kernel_fn)(*dev_ctx, *x_dense, *y_dense, out_dense.get());
+
+    // Set up autograd
+    egr::AutogradMeta* x_autograd_meta =
+        egr::EagerUtils::nullable_autograd_meta(x);
+    egr::AutogradMeta* y_autograd_meta =
+        egr::EagerUtils::nullable_autograd_meta(y);
+    egr::AutogradMeta* out_autograd_meta =
+        egr::EagerUtils::autograd_meta(&out_tensor);
+    bool trace_backward = egr::Controller::Instance().HasGrad();
+    bool require_any_grad = egr::EagerUtils::ComputeRequireGrad(
+        trace_backward, x_autograd_meta, y_autograd_meta);
+
+    if (require_any_grad) {
+      egr::EagerUtils::PassStopGradient(false, out_autograd_meta);
+      auto grad_node =
+          std::shared_ptr<MultiplyGradNode>(new MultiplyGradNode(1, 2));
+      grad_node->SetAttribute_axis(-1);
+      grad_node->SetComplexReal(true);
+      grad_node->SetComplexRealSwapped(!phi::IsComplexType(x.dtype()));
+      // Store tensors in normalized order: x_=complex, y_=real
+      grad_node->SetTensorWrapper_x(cx);
+      grad_node->SetTensorWrapper_y(ry);
+      grad_node->SetGradOutMeta(x, 0);
+      grad_node->SetGradOutMeta(y, 1);
+      if (out_autograd_meta) {
+        egr::EagerUtils::SetOutRankWithSlot(out_autograd_meta, 0);
+        egr::EagerUtils::SetHistory(out_autograd_meta, grad_node);
+      }
+      grad_node->SetGradInMeta(out_tensor, 0);
+    }
+
+    return out_tensor;
   }
 
   // Type promotion Logic

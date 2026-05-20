@@ -29,7 +29,11 @@
 #include "paddle/phi/api/backward/sparse_backward_api_base.h"
 #include "paddle/phi/api/include/sparse_api.h"
 #include "paddle/phi/api/lib/api_custom_impl.h"
+#include "paddle/phi/backends/context_pool.h"
+#include "paddle/phi/core/compat/convert_utils.h"
+#include "paddle/phi/core/kernel_factory.h"
 #include "paddle/phi/core/platform/profiler/event_tracing.h"
+#include "paddle/phi/kernels/complex_mul_real_kernel.h"
 
 using egr::ConvertAllInputsToDistTensor;
 using egr::InputsContainDistTensor;
@@ -145,26 +149,79 @@ MultiplyGradNode::operator()(
   }
   VLOG(3) << "\n"
           << SEPARATOR << "Running_C++_API: " << unique_api_name << SEPARATOR;
+
   std::string grad_op_name = "multiply_grad";
   auto need_skip =
       paddle::prim::StaticCompositeContext::Instance().CheckSkipCompOps(
           grad_op_name);
-  if (paddle::prim::PrimCommonUtils::IsEagerPrimEnabled() && !need_skip) {
-    bool original_global_grad = egr::Controller::Instance().HasGrad();
-    if (!create_graph) {
-      egr::Controller::Instance().SetHasGrad(create_graph);
+
+  if (IsComplexReal()) {
+    // Complex * Real backward: x is complex, y is real
+    // Call complex_mul_real_grad kernel directly
+    auto* x_dense = static_cast<phi::DenseTensor*>(x.impl().get());
+    auto* y_dense = static_cast<phi::DenseTensor*>(y.impl().get());
+    auto* dout_dense = static_cast<phi::DenseTensor*>(grad_out.impl().get());
+    auto* dev_ctx = phi::DeviceContextPool::Instance().Get(x.place());
+
+    auto kernel_result =
+        phi::KernelFactory::Instance().SelectKernelOrThrowError(
+            "complex_mul_real_grad",
+            {phi::TransToPhiBackend(x.place()),
+             phi::DataLayout::ALL_LAYOUT,
+             x.dtype()});
+    const auto& kernel = kernel_result.kernel;
+    using kernel_signature = void (*)(const phi::DeviceContext&,
+                                      const phi::DenseTensor&,
+                                      const phi::DenseTensor&,
+                                      const phi::DenseTensor&,
+                                      int,
+                                      phi::DenseTensor*,
+                                      phi::DenseTensor*);
+    auto* kernel_fn = kernel.GetVariadicKernelFn<kernel_signature>();
+
+    // Determine which original input was complex and which was real
+    // In forward, we stored x_=complex, y_=real
+    // GradOutMeta slot 0 = original x, slot 1 = original y
+    // If swapped: original x was real, original y was complex
+    //   dx (complex grad) -> slot 1, dy (real grad) -> slot 0
+    // If not swapped: original x was complex, original y was real
+    //   dx (complex grad) -> slot 0, dy (real grad) -> slot 1
+    bool swapped = IsComplexRealSwapped();
+    paddle::Tensor* complex_grad_out = swapped ? api_output_1 : api_output_0;
+    paddle::Tensor* real_grad_out = swapped ? api_output_0 : api_output_1;
+
+    phi::DenseTensor dx_dense, dy_dense;
+    phi::DenseTensor* dx_ptr = complex_grad_out ? &dx_dense : nullptr;
+    phi::DenseTensor* dy_ptr = real_grad_out ? &dy_dense : nullptr;
+
+    (*kernel_fn)(
+        *dev_ctx, *x_dense, *y_dense, *dout_dense, axis, dx_ptr, dy_ptr);
+
+    if (complex_grad_out && dx_ptr) {
+      complex_grad_out->set_impl(std::make_shared<phi::DenseTensor>(dx_dense));
     }
-    paddle::prim::multiply_grad<paddle::Tensor>(
-        x, y, grad_out, axis, api_output_0, api_output_1);
-    VLOG(4) << "Composite api multiply_grad is called ";
-    if (!create_graph) {
-      egr::Controller::Instance().SetHasGrad(original_global_grad);
+    if (real_grad_out && dy_ptr) {
+      real_grad_out->set_impl(std::make_shared<phi::DenseTensor>(dy_dense));
     }
+    VLOG(4) << "complex_mul_real_grad kernel is called ";
   } else {
-    paddle::experimental::multiply_grad(
-        x, y, grad_out, axis, api_output_0, api_output_1);
-    VLOG(4) << "Fused api multiply_grad is called ";
-  }
+    if (paddle::prim::PrimCommonUtils::IsEagerPrimEnabled() && !need_skip) {
+      bool original_global_grad = egr::Controller::Instance().HasGrad();
+      if (!create_graph) {
+        egr::Controller::Instance().SetHasGrad(create_graph);
+      }
+      paddle::prim::multiply_grad<paddle::Tensor>(
+          x, y, grad_out, axis, api_output_0, api_output_1);
+      VLOG(4) << "Composite api multiply_grad is called ";
+      if (!create_graph) {
+        egr::Controller::Instance().SetHasGrad(original_global_grad);
+      }
+    } else {
+      paddle::experimental::multiply_grad(
+          x, y, grad_out, axis, api_output_0, api_output_1);
+      VLOG(4) << "Fused api multiply_grad is called ";
+    }
+  }  // end else (non-complex-real path)
   VLOG(3) << "\n"
           << SEPARATOR << "Finish_C++_API: " << unique_api_name << SEPARATOR;
   // Check NaN and Inf id needed
