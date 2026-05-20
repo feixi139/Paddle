@@ -24,6 +24,7 @@ limitations under the License. */
 #endif
 #include "paddle/phi/common/amp_type_traits.h"
 #include "paddle/phi/common/type_safe_sign_math.h"
+#include "paddle/phi/common/type_traits.h"
 #include "paddle/phi/kernels/funcs/sleef_vectorized_math.h"
 
 #ifdef PADDLE_WITH_SLEEF
@@ -93,6 +94,15 @@ struct MultiplyFunctor<bool> {
 };
 template <typename T>
 using InverseMultiplyFunctor = MultiplyFunctor<T>;
+
+// Complex * Real without FMA to match PyTorch precision
+template <typename T>
+struct ComplexMulRealFunctor {
+  using RealT = typename phi::dtype::Real<T>;
+  inline HOSTDEVICE T operator()(const T a, const RealT b) const {
+    return T(a.real * b, a.imag * b);
+  }
+};
 
 template <typename T>
 struct IsZeroFunctor {

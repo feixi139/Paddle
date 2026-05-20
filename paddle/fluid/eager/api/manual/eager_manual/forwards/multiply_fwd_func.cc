@@ -21,9 +21,15 @@
 #include "paddle/fluid/eager/type_promotion_utils.h"
 #include "paddle/fluid/imperative/amp_utils.h"
 #include "paddle/phi/api/include/sparse_api.h"
+#include "paddle/phi/backends/context_pool.h"
 #include "paddle/phi/common/place.h"
 #include "paddle/phi/common/type_promotion.h"
+#include "paddle/phi/core/compat/convert_utils.h"
+#include "paddle/phi/core/kernel_factory.h"
 #include "paddle/phi/core/platform/profiler/event_tracing.h"
+#include "paddle/phi/core/utils/data_type.h"
+#include "paddle/phi/infermeta/binary.h"
+#include "paddle/phi/kernels/complex_mul_real_kernel.h"
 
 COMMON_DECLARE_bool(check_nan_inf);
 COMMON_DECLARE_bool(check_cuda_error);
@@ -77,6 +83,56 @@ paddle::Tensor multiply_ad_func(
           egr::Controller::Instance().GetCurrentAmpAttrs(),
           paddle::imperative::AmpLevel::O0);
       return multiply_ad_func(new_x, new_y);
+    }
+  }
+
+  // Cross-precision complex+float force promotion:
+  // NeedSkipPromotionForComplexFloatReduce returns true for ALL complex+float
+  // broadcast cases (including cross-precision like complex64+float64),
+  // which would suppress the normal NeedTypePromotion check below.
+  // Since we can't modify type_promotion.h, we handle these cases explicitly.
+  {
+    auto is_complex_real_pair = [](phi::DataType a, phi::DataType b) {
+      return (phi::IsComplexType(a) && phi::is_support_float(b)) ||
+             (phi::is_support_float(a) && phi::IsComplexType(b));
+    };
+    auto is_cross_precision = [](phi::DataType a, phi::DataType b) {
+      // complex64+float64 or complex128+float32 are cross-precision.
+      return (a == phi::DataType::COMPLEX64 && b == phi::DataType::FLOAT64) ||
+             (a == phi::DataType::COMPLEX128 && b == phi::DataType::FLOAT32) ||
+             (b == phi::DataType::COMPLEX64 && a == phi::DataType::FLOAT64) ||
+             (b == phi::DataType::COMPLEX128 && a == phi::DataType::FLOAT32);
+    };
+    if (is_complex_real_pair(x.dtype(), y.dtype())) {
+      if (is_cross_precision(x.dtype(), y.dtype())) {
+        // Cross-precision (e.g., complex64+float64): always promote to
+        // complex128 regardless of shape or backend.
+        VLOG(5) << "Cross-precision complex+float detected (" << x.dtype()
+                << ", " << y.dtype()
+                << "), forcing type promotion to complex128.";
+        auto new_x = egr::PromoteCast("x", x, phi::DataType::COMPLEX128);
+        auto new_y = egr::PromoteCast("y", y, phi::DataType::COMPLEX128);
+        return multiply_ad_func(new_x, new_y);
+      }
+      // Precision-matched (complex64+float32 or complex128+float64) on
+      // non-GPU devices: the GPU fast path has already returned above.
+      // On CPU (and other non-GPU devices),
+      // NeedSkipPromotionForComplexFloatReduce would have suppressed type
+      // promotion for the broadcast case, causing the kernel to receive mixed
+      // types which it cannot handle. Force type promotion so both inputs
+      // become the same complex type.
+      if (!phi::is_gpu_place(x.place()) &&
+          phi::NeedSkipPromotionForComplexFloatReduce(
+              "multiply", x.dtype(), y.dtype(), x.shape(), y.shape())) {
+        auto promote_dtype =
+            phi::IsComplexType(x.dtype()) ? x.dtype() : y.dtype();
+        VLOG(5) << "Precision-matched complex+float broadcast on non-GPU ("
+                << x.dtype() << ", " << y.dtype()
+                << "), forcing type promotion to " << promote_dtype;
+        auto new_x = egr::PromoteCast("x", x, promote_dtype);
+        auto new_y = egr::PromoteCast("y", y, promote_dtype);
+        return multiply_ad_func(new_x, new_y);
+      }
     }
   }
 
@@ -309,6 +365,41 @@ paddle::Tensor& multiply__ad_func(
       << " No AMP for multiply__ad_func because it is a inplace or cast api. ";
 
   // Type promotion Logic
+  // Handle complex+float pairs that NeedSkipPromotionForComplexFloatReduce
+  // would suppress. We can't modify type_promotion.h, so handle here.
+  {
+    auto is_cross_precision_complex_real = [](phi::DataType a,
+                                              phi::DataType b) {
+      return (a == phi::DataType::COMPLEX64 && b == phi::DataType::FLOAT64) ||
+             (a == phi::DataType::COMPLEX128 && b == phi::DataType::FLOAT32) ||
+             (b == phi::DataType::COMPLEX64 && a == phi::DataType::FLOAT64) ||
+             (b == phi::DataType::COMPLEX128 && a == phi::DataType::FLOAT32);
+    };
+    if (is_cross_precision_complex_real(x.dtype(), y.dtype())) {
+      VLOG(5)
+          << "Cross-precision complex+float (multiply_), forcing complex128.";
+      x = egr::PromoteCastInplace("x", x, phi::DataType::COMPLEX128);
+      auto new_y = egr::PromoteCast("y", y, phi::DataType::COMPLEX128);
+      return multiply__ad_func(x, new_y);
+    }
+    // Precision-matched (complex64+float32 or complex128+float64) on non-GPU:
+    // NeedSkipPromotion suppresses the promotion for broadcast cases, causing
+    // the kernel to receive mixed types. Force promotion on non-GPU.
+    if (!phi::is_gpu_place(x.place()) &&
+        ((phi::IsComplexType(x.dtype()) && phi::is_support_float(y.dtype())) ||
+         (phi::is_support_float(x.dtype()) && phi::IsComplexType(y.dtype()))) &&
+        phi::NeedSkipPromotionForComplexFloatReduce(
+            "multiply_", x.dtype(), y.dtype(), x.shape(), y.shape())) {
+      auto promote_dtype =
+          phi::IsComplexType(x.dtype()) ? x.dtype() : y.dtype();
+      VLOG(5) << "Precision-matched complex+float broadcast on non-GPU "
+                 "(multiply_), forcing promotion to "
+              << promote_dtype;
+      x = egr::PromoteCastInplace("x", x, promote_dtype);
+      auto new_y = egr::PromoteCast("y", y, promote_dtype);
+      return multiply__ad_func(x, new_y);
+    }
+  }
   if (phi::NeedTypePromotion(
           "multiply_", x.dtype(), y.dtype(), x.shape(), y.shape())) {
     VLOG(5) << "got different data type, run type promotion automatically.";

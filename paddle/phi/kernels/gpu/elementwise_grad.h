@@ -17,24 +17,86 @@ limitations under the License. */
 #include "glog/logging.h"
 
 #include "paddle/phi/common/place.h"
+#include "paddle/phi/common/type_traits.h"
 #include "paddle/phi/core/tensor_utils.h"
+#include "paddle/phi/kernels/complex_kernel.h"
 #include "paddle/phi/kernels/full_kernel.h"
 #include "paddle/phi/kernels/funcs/broadcast_function.h"
+#include "paddle/phi/kernels/funcs/elementwise_functor.h"
 #include "paddle/phi/kernels/funcs/elementwise_grad_base.h"
 #include "paddle/phi/kernels/funcs/reduce_function.h"
 #include "paddle/phi/kernels/reduce_sum_kernel.h"
+#include "paddle/phi/kernels/scale_kernel.h"
 
 namespace phi {
+
+// When T is complex, splits the complex tensor into real/imag stride=2 views,
+// reduces each separately as float, then combines back into complex output.
+// This matches PyTorch's approach and avoids precision differences.
+template <typename T>
+void ReduceAsRealThenCombine(const GPUContext &dev_ctx,
+                             int axis,
+                             DenseTensor *src,
+                             DenseTensor *dst) {
+  if constexpr (std::is_same<T, phi::complex64>::value ||
+                std::is_same<T, phi::complex128>::value) {
+    using RealT = typename phi::dtype::Real<T>;
+
+    constexpr DataType RealDType = std::is_same<RealT, float>::value
+                                       ? DataType::FLOAT32
+                                       : DataType::FLOAT64;
+
+    DDim strides = src->strides();
+    for (int i = 0; i < strides.size(); ++i) {
+      strides[i] *= 2;
+    }
+
+    std::vector<int> reduce_dims =
+        funcs::GetReduceDim(dst->dims(), src->dims(), axis);
+
+    auto reduce_complex_part = [&](size_t offset_bytes, DenseTensor *reduced) {
+      DenseTensorMeta part_meta(RealDType, src->dims(), strides);
+      part_meta.offset = src->meta().offset + offset_bytes;
+      DenseTensor part_view(src->Holder(), part_meta);
+
+      reduced->Resize(dst->dims());
+      dev_ctx.template Alloc<RealT>(reduced);
+
+      SumKernel<RealT, GPUContext>(
+          dev_ctx, part_view, reduce_dims, RealDType, false, reduced);
+    };
+
+    DenseTensor real_reduced;
+    DenseTensor imag_reduced;
+
+    reduce_complex_part(0, &real_reduced);
+    reduce_complex_part(sizeof(RealT), &imag_reduced);
+
+    dev_ctx.template Alloc<T>(dst);
+    ComplexKernel<RealT, GPUContext>(dev_ctx, real_reduced, imag_reduced, dst);
+  } else {
+    std::vector<int> reduce_dims =
+        funcs::GetReduceDim(dst->dims(), src->dims(), axis);
+
+    SumKernel<T, GPUContext>(
+        dev_ctx, *src, reduce_dims, src->dtype(), false, dst);
+  }
+}
 
 template <typename T>
 void ReduceWrapper(const GPUContext &dev_ctx,
                    int axis,
                    DenseTensor *src,
                    DenseTensor *dst) {
-  std::vector<int> reduce_dims =
-      funcs::GetReduceDim(dst->dims(), src->dims(), axis);
-  SumKernel<T, GPUContext>(
-      dev_ctx, *src, reduce_dims, src->dtype(), false, dst);
+  if constexpr (std::is_same<T, phi::complex64>::value ||
+                std::is_same<T, phi::complex128>::value) {
+    ReduceAsRealThenCombine<T>(dev_ctx, axis, src, dst);
+  } else {
+    std::vector<int> reduce_dims =
+        funcs::GetReduceDim(dst->dims(), src->dims(), axis);
+    SumKernel<T, GPUContext>(
+        dev_ctx, *src, reduce_dims, src->dtype(), false, dst);
+  }
 }
 
 template <typename T, typename Functor>
@@ -307,10 +369,9 @@ void DefaultElementwiseAddGrad(const GPUContext &dev_ctx,
         dx->Resize(x.dims());
         dev_ctx.template Alloc<T>(dx);
       }
-      std::vector<int> reduce_dims =
-          funcs::GetReduceDim(x.dims(), out.dims(), axis);
-      SumKernel<T, GPUContext>(
-          dev_ctx, dout, reduce_dims, dout.dtype(), false, dx);
+      DenseTensor dout_mutable;
+      dout_mutable.ShareDataWith(dout);
+      ReduceAsRealThenCombine<T>(dev_ctx, axis, &dout_mutable, dx);
     }
   }
   // dy
@@ -321,10 +382,9 @@ void DefaultElementwiseAddGrad(const GPUContext &dev_ctx,
         Copy(dev_ctx, dout, dev_ctx.GetPlace(), false, dy);
       }
     } else {
-      std::vector<int> reduce_dims =
-          funcs::GetReduceDim(y.dims(), out.dims(), axis);
-      SumKernel<T, GPUContext>(
-          dev_ctx, dout, reduce_dims, dout.dtype(), false, dy);
+      DenseTensor dout_mutable;
+      dout_mutable.ShareDataWith(dout);
+      ReduceAsRealThenCombine<T>(dev_ctx, axis, &dout_mutable, dy);
     }
   }
 }
@@ -430,10 +490,9 @@ void default_elementwise_sub_grad(const GPUContext &dev_ctx,
         dx->Resize(x.dims());
         dev_ctx.template Alloc<T>(dx);
       }
-      std::vector<int> reduce_dims =
-          funcs::GetReduceDim(x.dims(), out.dims(), axis);
-      SumKernel<T, GPUContext>(
-          dev_ctx, dout, reduce_dims, dout.dtype(), false, dx);
+      DenseTensor dout_mutable;
+      dout_mutable.ShareDataWith(dout);
+      ReduceAsRealThenCombine<T>(dev_ctx, axis, &dout_mutable, dx);
     }
   }
   // dy
@@ -450,10 +509,26 @@ void default_elementwise_sub_grad(const GPUContext &dev_ctx,
                 dout.data<T>(), size, nullptr, dev_ctx.template Alloc<T>(dy));
       }
     } else {
-      std::vector<int> reduce_dims =
-          funcs::GetReduceDim(y.dims(), out.dims(), axis);
-      funcs::ReduceKernel<T, T, kps::AddFunctor, kps::InverseFunctor<T>>(
-          dev_ctx, dout, dy, kps::InverseFunctor<T>(), reduce_dims);
+      if constexpr (std::is_same<T, phi::complex64>::value ||
+                    std::is_same<T, phi::complex128>::value) {
+        // dy = -reduce_sum(dout)
+        DenseTensor dout_mutable;
+        dout_mutable.ShareDataWith(dout);
+
+        DenseTensor reduced_dout;
+        reduced_dout.Resize(y.dims());
+
+        ReduceAsRealThenCombine<T>(dev_ctx, axis, &dout_mutable, &reduced_dout);
+
+        dy->Resize(reduced_dout.dims());
+        ScaleKernel<T, GPUContext>(
+            dev_ctx, reduced_dout, Scalar(-1.0), Scalar(0.0), true, dy);
+      } else {
+        std::vector<int> reduce_dims =
+            funcs::GetReduceDim(y.dims(), out.dims(), axis);
+        funcs::ReduceKernel<T, T, kps::AddFunctor, kps::InverseFunctor<T>>(
+            dev_ctx, dout, dy, kps::InverseFunctor<T>(), reduce_dims);
+      }
     }
   }
 }
@@ -547,6 +622,7 @@ void ElementwiseMulGrad(const GPUContext &dev_ctx,
     return;
   }
 
+  // Standard same-type path
   if (dx != nullptr && dy != nullptr) {
     std::vector<const DenseTensor *> ins = {&dout, &y, &x};
     GetGradXAndYOut<T>(dev_ctx,
@@ -567,4 +643,82 @@ void ElementwiseMulGrad(const GPUContext &dev_ctx,
         dev_ctx, place, axis, ins, dout, dy, funcs::MultiplyGradFunctor<T>());
   }
 }
+
+// Complex * Real backward overload.
+// T is a complex type. x is complex, y is real, dout is complex.
+// dx (complex) = dout * y  (using ComplexMulRealFunctor)
+// dy (real) = reduce(real(dout * conj(x)))
+//   computed via stride-2 real view reduce.
+template <typename T>
+void ElementwiseMulComplexRealGrad(const GPUContext &dev_ctx,
+                                   const DenseTensor &x,
+                                   const DenseTensor &y,
+                                   const DenseTensor &dout,
+                                   int axis,
+                                   DenseTensor *dx,
+                                   DenseTensor *dy) {
+  using RealT = typename phi::dtype::Real<T>;
+  constexpr DataType RealDType =
+      std::is_same<RealT, float>::value ? DataType::FLOAT32 : DataType::FLOAT64;
+  const auto place = dev_ctx.GetPlace();
+
+  if (dout.numel() == 0) {
+    if (dx) {
+      if (dx->numel() == 0) {
+        dev_ctx.template Alloc<T>(dx);
+      } else {
+        Full<T, GPUContext>(dev_ctx, dx->dims(), 0, dx);
+      }
+    }
+    if (dy) {
+      if (dy->numel() == 0) {
+        dev_ctx.template Alloc<RealT>(dy);
+      } else {
+        Full<RealT, GPUContext>(dev_ctx, dy->dims(), 0, dy);
+      }
+    }
+    return;
+  }
+
+  // dx = dout * y (complex = complex * real)
+  if (dx != nullptr) {
+    std::vector<const DenseTensor *> ins = {&dout, &y};
+    GetGradXOrYOut<T>(
+        dev_ctx, place, axis, ins, dout, dx, funcs::ComplexMulRealFunctor<T>());
+  }
+
+  // dy = real(dout * conj(x)), then reduce to y's shape
+  if (dy != nullptr) {
+    // Compute dout * conj(x) into a temporary complex tensor
+    DenseTensor tmp_complex;
+    tmp_complex.Resize(dout.dims());
+    dev_ctx.template Alloc<T>(&tmp_complex);
+    {
+      std::vector<const DenseTensor *> ins = {&dout, &x};
+      std::vector<DenseTensor *> outs = {&tmp_complex};
+      funcs::BroadcastKernel<T>(
+          dev_ctx, ins, &outs, funcs::MultiplyGradFunctor<T>(), axis);
+    }
+
+    // Extract real part via stride-2 view and reduce to dy's shape
+    DDim strides = tmp_complex.strides();
+    for (int i = 0; i < strides.size(); ++i) {
+      strides[i] *= 2;
+    }
+    DenseTensorMeta real_meta(RealDType, tmp_complex.dims(), strides);
+    real_meta.offset = tmp_complex.meta().offset;
+    DenseTensor real_view(tmp_complex.Holder(), real_meta);
+
+    if (dy->dims() == dout.dims()) {
+      RealKernel<T, GPUContext>(dev_ctx, tmp_complex, dy);
+    } else {
+      std::vector<int> reduce_dims =
+          funcs::GetReduceDim(dy->dims(), dout.dims(), axis);
+      dev_ctx.template Alloc<RealT>(dy);
+      SumKernel<RealT, GPUContext>(
+          dev_ctx, real_view, reduce_dims, RealDType, false, dy);
+    }
+  }
+}
+
 }  // namespace phi
