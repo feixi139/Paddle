@@ -15,6 +15,8 @@
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #ifndef PADDLE_WITH_XPU_KP
 #endif
+#include "paddle/phi/common/type_promotion.h"
+#include "paddle/phi/common/type_traits.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/impl/elementwise_kernel_impl.h"
 #include "paddle/phi/kernels/legacy/elementwise_add_kernel.h"
@@ -46,7 +48,58 @@ void MultiplyKernel(const Context& dev_ctx,
     dev_ctx.template Alloc<T>(out);
     return;
   }
-  phi::MultiplyRawKernel<T, Context>(dev_ctx, x, y, -1, out);
+
+  auto is_float32_or_float64 = [](phi::DataType dtype) {
+    return dtype == phi::DataType::FLOAT32 || dtype == phi::DataType::FLOAT64;
+  };
+
+  auto is_complex_real_pair = [](phi::DataType a, phi::DataType b) {
+    return (phi::IsComplexType(a) && is_float32_or_float64(b)) ||
+           (is_float32_or_float64(a) && phi::IsComplexType(b));
+  };
+
+  if (is_complex_real_pair(x.dtype(), y.dtype())) {
+    if constexpr (!(std::is_same<T, phi::complex64>::value ||
+                    std::is_same<T, phi::complex128>::value)) {
+      PADDLE_THROW(common::errors::InvalidArgument(
+          "complex+float multiply dispatch dtype is wrong. "
+          "It should dispatch to complex64 or complex128 kernel, "
+          "but got non-complex kernel. x dtype is %s, y dtype is %s.",
+          phi::DataTypeToString(x.dtype()).c_str(),
+          phi::DataTypeToString(y.dtype()).c_str()));
+    }
+  }
+
+  if constexpr (std::is_same<T, phi::complex64>::value ||
+                std::is_same<T, phi::complex128>::value) {
+    if (is_complex_real_pair(x.dtype(), y.dtype())) {
+      dev_ctx.template Alloc<T>(out);
+
+      std::vector<const DenseTensor*> inputs = {&x, &y};
+      std::vector<DenseTensor*> outputs = {out};
+
+      if constexpr (std::is_same<T, phi::complex64>::value) {
+        funcs::BroadcastKernel(dev_ctx,
+                               inputs,
+                               &outputs,
+                               funcs::ComplexMulRealFunctor<phi::complex64,
+                                                            phi::complex64,
+                                                            float>{},
+                               -1);
+      } else {
+        funcs::BroadcastKernel(dev_ctx,
+                               inputs,
+                               &outputs,
+                               funcs::ComplexMulRealFunctor<phi::complex128,
+                                                            phi::complex128,
+                                                            double>{},
+                               -1);
+      }
+      return;
+    }
+  }
+
+  phi::MultiplyRawKernel<T>(dev_ctx, x, y, -1, out);
 }
 
 template <typename T, typename Context>

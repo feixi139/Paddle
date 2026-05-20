@@ -29,6 +29,8 @@
 #include "paddle/phi/api/backward/sparse_backward_api_base.h"
 #include "paddle/phi/api/include/sparse_api.h"
 #include "paddle/phi/api/lib/api_custom_impl.h"
+#include "paddle/phi/backends/context_pool.h"
+#include "paddle/phi/core/compat/convert_utils.h"
 #include "paddle/phi/core/platform/profiler/event_tracing.h"
 
 using egr::ConvertAllInputsToDistTensor;
@@ -145,10 +147,12 @@ MultiplyGradNode::operator()(
   }
   VLOG(3) << "\n"
           << SEPARATOR << "Running_C++_API: " << unique_api_name << SEPARATOR;
+
   std::string grad_op_name = "multiply_grad";
   auto need_skip =
       paddle::prim::StaticCompositeContext::Instance().CheckSkipCompOps(
           grad_op_name);
+
   if (paddle::prim::PrimCommonUtils::IsEagerPrimEnabled() && !need_skip) {
     bool original_global_grad = egr::Controller::Instance().HasGrad();
     if (!create_graph) {

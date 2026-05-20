@@ -21,9 +21,14 @@
 #include "paddle/fluid/eager/type_promotion_utils.h"
 #include "paddle/fluid/imperative/amp_utils.h"
 #include "paddle/phi/api/include/sparse_api.h"
+#include "paddle/phi/backends/context_pool.h"
 #include "paddle/phi/common/place.h"
 #include "paddle/phi/common/type_promotion.h"
+#include "paddle/phi/core/compat/convert_utils.h"
+#include "paddle/phi/core/kernel_factory.h"
 #include "paddle/phi/core/platform/profiler/event_tracing.h"
+#include "paddle/phi/core/utils/data_type.h"
+#include "paddle/phi/infermeta/binary.h"
 
 COMMON_DECLARE_bool(check_nan_inf);
 COMMON_DECLARE_bool(check_cuda_error);
@@ -80,9 +85,56 @@ paddle::Tensor multiply_ad_func(
     }
   }
 
+  // Cross-precision complex+float normalization.
+  //
+  // For the special complex+float reduce path, do not promote both inputs to
+  // complex. Instead, normalize cross-precision pairs to precision-matched
+  // complex+real pairs:
+  //
+  //   complex64  + float64 -> complex128 + float64
+  //   complex128 + float32 -> complex128 + float64
+  //
+  // Then the following NeedTypePromotion(...) can skip normal promotion and
+  // forward kernel will receive precision-matched complex+real inputs.
+  auto is_complex64_float64_pair = [](phi::DataType a, phi::DataType b) {
+    return (a == phi::DataType::COMPLEX64 && b == phi::DataType::FLOAT64) ||
+           (a == phi::DataType::FLOAT64 && b == phi::DataType::COMPLEX64);
+  };
+
+  auto is_complex128_float32_pair = [](phi::DataType a, phi::DataType b) {
+    return (a == phi::DataType::COMPLEX128 && b == phi::DataType::FLOAT32) ||
+           (a == phi::DataType::FLOAT32 && b == phi::DataType::COMPLEX128);
+  };
+
+  if (is_complex64_float64_pair(x.dtype(), y.dtype())) {
+    VLOG(5) << "Normalize cross-precision complex+float multiply: "
+            << "complex64 + float64 -> complex128 + float64.";
+
+    if (x.dtype() == phi::DataType::COMPLEX64) {
+      auto new_x = egr::PromoteCast("x", x, phi::DataType::COMPLEX128);
+      return multiply_ad_func(new_x, y);
+    } else {
+      auto new_y = egr::PromoteCast("y", y, phi::DataType::COMPLEX128);
+      return multiply_ad_func(x, new_y);
+    }
+  }
+
+  if (is_complex128_float32_pair(x.dtype(), y.dtype())) {
+    VLOG(5) << "Normalize cross-precision complex+float multiply: "
+            << "complex128 + float32 -> complex128 + float64.";
+
+    if (x.dtype() == phi::DataType::FLOAT32) {
+      auto new_x = egr::PromoteCast("x", x, phi::DataType::FLOAT64);
+      return multiply_ad_func(new_x, y);
+    } else {
+      auto new_y = egr::PromoteCast("y", y, phi::DataType::FLOAT64);
+      return multiply_ad_func(x, new_y);
+    }
+  }
+
   // Type promotion Logic
   if (phi::NeedTypePromotion(
-          "multiply", x.dtype(), y.dtype(), x.shape(), y.shape())) {
+          "multiply", x.dtype(), y.dtype(), x.shape(), y.shape(), x.place())) {
     LOG_FIRST_N(WARNING, 1)
         << "got different data type, run type promotion "
            "automatically, this may cause data type been changed.";
@@ -309,8 +361,18 @@ paddle::Tensor& multiply__ad_func(
       << " No AMP for multiply__ad_func because it is a inplace or cast api. ";
 
   // Type promotion Logic
+  // Handle complex+float pairs that NeedSkipPromotionForComplexFloatReduce
+  // would suppress. We can't modify type_promotion.h, so handle here.
+  if (is_cross_precision(x.dtype(), y.dtype())) {
+    VLOG(5) << "Cross-precision complex+float (multiply_), forcing complex128.";
+    x = egr::PromoteCastInplace("x", x, phi::DataType::COMPLEX128);
+    auto new_y = egr::PromoteCast("y", y, phi::DataType::COMPLEX128);
+    return multiply__ad_func(x, new_y);
+  }
+  // Precision-matched complex+float: handled via place-aware
+  // NeedSkipPromotionForComplexFloatReduce.
   if (phi::NeedTypePromotion(
-          "multiply_", x.dtype(), y.dtype(), x.shape(), y.shape())) {
+          "multiply_", x.dtype(), y.dtype(), x.shape(), y.shape(), x.place())) {
     VLOG(5) << "got different data type, run type promotion automatically.";
     LOG_FIRST_N(WARNING, 1)
         << "got different data type, run type promotion "
@@ -547,7 +609,7 @@ paddle::Tensor multiply_ad_func(const paddle::Tensor& x,
 
   // Type promotion Logic
   if (phi::NeedTypePromotion(
-          "multiply", x.dtype(), y.dtype(), x.shape(), y.shape())) {
+          "multiply", x.dtype(), y.dtype(), x.shape(), y.shape(), x.place())) {
     VLOG(5) << "got different data type, run type promotion automatically.";
     LOG_FIRST_N(WARNING, 1)
         << "got different data type, run type promotion "

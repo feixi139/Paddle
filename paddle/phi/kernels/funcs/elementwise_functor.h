@@ -24,6 +24,7 @@ limitations under the License. */
 #endif
 #include "paddle/phi/common/amp_type_traits.h"
 #include "paddle/phi/common/type_safe_sign_math.h"
+#include "paddle/phi/common/type_traits.h"
 #include "paddle/phi/kernels/funcs/sleef_vectorized_math.h"
 
 #ifdef PADDLE_WITH_SLEEF
@@ -93,6 +94,29 @@ struct MultiplyFunctor<bool> {
 };
 template <typename T>
 using InverseMultiplyFunctor = MultiplyFunctor<T>;
+
+template <typename OutT, typename ComplexInT, typename RealInT>
+struct ComplexMulRealFunctor {
+  using OutRealT = typename phi::dtype::Real<OutT>;
+
+  // complex * real
+  inline HOSTDEVICE OutT operator()(const ComplexInT a, const RealInT b) const {
+    const OutRealT real =
+        static_cast<OutRealT>(a.real) * static_cast<OutRealT>(b);
+    const OutRealT imag =
+        static_cast<OutRealT>(a.imag) * static_cast<OutRealT>(b);
+    return OutT(real, imag);
+  }
+
+  // real * complex
+  inline HOSTDEVICE OutT operator()(const RealInT a, const ComplexInT b) const {
+    const OutRealT real =
+        static_cast<OutRealT>(a) * static_cast<OutRealT>(b.real);
+    const OutRealT imag =
+        static_cast<OutRealT>(a) * static_cast<OutRealT>(b.imag);
+    return OutT(real, imag);
+  }
+};
 
 template <typename T>
 struct IsZeroFunctor {
