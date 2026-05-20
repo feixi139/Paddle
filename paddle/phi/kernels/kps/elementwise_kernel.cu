@@ -15,6 +15,8 @@
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #ifndef PADDLE_WITH_XPU_KP
 #endif
+#include "paddle/phi/common/type_promotion.h"
+#include "paddle/phi/common/type_traits.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/impl/elementwise_kernel_impl.h"
 #include "paddle/phi/kernels/legacy/elementwise_add_kernel.h"
@@ -46,7 +48,65 @@ void MultiplyKernel(const Context& dev_ctx,
     dev_ctx.template Alloc<T>(out);
     return;
   }
+  // When type promotion is skipped (NeedSkipPromotionForComplexFloatReduce
+  // returned true), this kernel may receive a complex T tensor (x) and a
+  // real-valued tensor (y) whose dtype matches Real<T>. Use the specialized
+  // ComplexMulRealFunctor in that case to avoid reinterpreting memory.
+  if constexpr (std::is_same<T, phi::complex64>::value ||
+                std::is_same<T, phi::complex128>::value) {
+    using RealT = typename phi::dtype::Real<T>;
+    constexpr DataType RealDType = std::is_same<RealT, float>::value
+                                       ? DataType::FLOAT32
+                                       : DataType::FLOAT64;
+    // Check precision-matched complex+float: x is complex, y is matching real
+    if (phi::IsComplexType(x.dtype()) && y.dtype() == RealDType) {
+      dev_ctx.template Alloc<T>(out);
+      std::vector<const DenseTensor*> inputs = {&x, &y};
+      std::vector<DenseTensor*> outputs = {out};
+      funcs::BroadcastKernel<T>(
+          dev_ctx, inputs, &outputs, funcs::ComplexMulRealFunctor<T>(), -1);
+      return;
+    }
+    // x is real, y is complex (swapped): normalize and use functor
+    if (phi::IsComplexType(y.dtype()) && x.dtype() == RealDType) {
+      dev_ctx.template Alloc<T>(out);
+      std::vector<const DenseTensor*> inputs = {&y, &x};
+      std::vector<DenseTensor*> outputs = {out};
+      funcs::BroadcastKernel<T>(
+          dev_ctx, inputs, &outputs, funcs::ComplexMulRealFunctor<T>(), -1);
+      return;
+    }
+  }
+  if ((phi::IsComplexType(x.dtype()) != phi::IsComplexType(y.dtype())) &&
+      (phi::is_support_float(x.dtype()) || phi::is_support_float(y.dtype()))) {
+    PADDLE_THROW(common::errors::InvalidType(
+        "MultiplyKernel received mixed complex+float types (x: %s, y: %s) "
+        "with dispatch type T that could not handle them. "
+        "Type promotion should have been applied upstream.",
+        phi::DataTypeToString(x.dtype()).c_str(),
+        phi::DataTypeToString(y.dtype()).c_str()));
+  }
   phi::MultiplyRawKernel<T, Context>(dev_ctx, x, y, -1, out);
+}
+
+// Complex * Real forward overload.
+// T must be a complex type (complex64 or complex128).
+// x is complex, y is real, out is complex.
+template <typename T, typename Context>
+void MultiplyComplexRealKernel(const Context& dev_ctx,
+                               const DenseTensor& x,
+                               const DenseTensor& y,
+                               int axis,
+                               DenseTensor* out) {
+  if (x.numel() == 0 || y.numel() == 0) {
+    dev_ctx.template Alloc<T>(out);
+    return;
+  }
+  std::vector<const DenseTensor*> inputs = {&x, &y};
+  std::vector<DenseTensor*> outputs = {out};
+  dev_ctx.template Alloc<T>(out);
+  funcs::BroadcastKernel<T>(
+      dev_ctx, inputs, &outputs, funcs::ComplexMulRealFunctor<T>(), axis);
 }
 
 template <typename T, typename Context>

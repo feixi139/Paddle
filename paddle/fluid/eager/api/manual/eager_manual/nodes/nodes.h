@@ -254,6 +254,10 @@ class MultiplyGradNode : public egr::GradNodeBase {
 
   // SetAttributes
   void SetAttribute_axis(const int& axis) { axis_ = axis; }
+  void SetComplexReal(bool v) { complex_real_ = v; }
+  bool IsComplexReal() const { return complex_real_; }
+  void SetComplexRealSwapped(bool v) { complex_real_swapped_ = v; }
+  bool IsComplexRealSwapped() const { return complex_real_swapped_; }
 
  private:
   // TensorWrappers
@@ -263,6 +267,8 @@ class MultiplyGradNode : public egr::GradNodeBase {
   // Attributes
   std::string name_{"MultiplyGradNode"};
   int axis_ = -1;
+  bool complex_real_ = false;
+  bool complex_real_swapped_ = false;
 };
 
 class MultiplyDoubleGradNode : public egr::GradNodeBase {

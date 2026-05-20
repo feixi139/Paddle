@@ -13,7 +13,10 @@
 // limitations under the License.
 #pragma once
 
+#include <unordered_set>
+
 #include "paddle/phi/common/data_type.h"
+#include "paddle/phi/common/place.h"
 namespace phi {
 
 inline int DataTypeToNum(const DataType& dtype) {
@@ -182,12 +185,75 @@ inline phi::DataType GetPromoteDtypeOldIr(const std::string& op_name,
   return phi::promoteTypes(x, y);
 }
 
+inline bool NeedSkipPromotionForComplexFloatReduce(
+    const std::string& op_name,
+    const DataType& x_dtype,
+    const DataType& y_dtype,
+    const std::vector<int64_t>& x_shape,
+    const std::vector<int64_t>& y_shape,
+    const phi::Place& place = phi::Place()) {
+  if (!phi::is_gpu_place(place)) {
+    return false;
+  }
+  constexpr int kNotComplexFloat = 0;
+  constexpr int kFloatSideX = 1;
+  constexpr int kFloatSideY = 2;
+
+  auto get_float_side = [&]() {
+    if (is_support_float(x_dtype) && is_support_complex(y_dtype)) {
+      return kFloatSideX;
+    }
+    if (is_support_complex(x_dtype) && is_support_float(y_dtype)) {
+      return kFloatSideY;
+    }
+    return kNotComplexFloat;
+  };
+
+  auto is_target_op = [&]() {
+    return op_name == "add" || op_name == "add_" ||
+           op_name == "elementwise_add" || op_name == "subtract" ||
+           op_name == "subtract_" || op_name == "elementwise_sub" ||
+           op_name == "multiply" || op_name == "multiply_" ||
+           op_name == "elementwise_mul";
+  };
+
+  auto need_reduce_for_broadcast = [](const std::vector<int64_t>& float_shape,
+                                      const std::vector<int64_t>& other_shape) {
+    if (float_shape.size() < other_shape.size()) {
+      return true;
+    }
+
+    const size_t offset = float_shape.size() - other_shape.size();
+    for (size_t i = 0; i < other_shape.size(); ++i) {
+      if (float_shape[i + offset] == 1 && other_shape[i] != 1) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const int float_side = get_float_side();
+  if (float_side == kNotComplexFloat) {
+    return false;
+  }
+
+  if (!is_target_op()) {
+    return false;
+  }
+
+  return float_side == kFloatSideX
+             ? need_reduce_for_broadcast(x_shape, y_shape)
+             : need_reduce_for_broadcast(y_shape, x_shape);
+}
+
 inline bool NeedTypePromotion(
     const std::string& op_name,
     const DataType& x_dtype,
     const DataType& y_dtype,
     const std::vector<int64_t>& x_shape = std::vector<int64_t>(),
-    const std::vector<int64_t>& y_shape = std::vector<int64_t>()) {
+    const std::vector<int64_t>& y_shape = std::vector<int64_t>(),
+    const phi::Place& place = phi::Place()) {
   if (x_dtype == y_dtype) {
     if (op_name == "divide" || op_name == "divide_") {
       if (is_support_int(x_dtype) && is_support_int(y_dtype)) {
@@ -196,6 +262,12 @@ inline bool NeedTypePromotion(
     }
     return false;
   }
+
+  if (NeedSkipPromotionForComplexFloatReduce(
+          op_name, x_dtype, y_dtype, x_shape, y_shape, place)) {
+    return false;
+  }
+
   // Tensor + 0-d Tensor
   if (support_promotion_ops.find(op_name) != support_promotion_ops.end() &&
       (x_shape.size() == 0 || y_shape.size() == 0)) {

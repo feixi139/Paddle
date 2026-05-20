@@ -345,7 +345,8 @@ collect_srcs(
   tensor_method.cc
   tensor_copy.cc
   scalar.cc
-  int_array.cc)
+  int_array.cc
+  complex_backward_api.cc)
 collect_generated_srcs(
   api_srcs
   SRCS
