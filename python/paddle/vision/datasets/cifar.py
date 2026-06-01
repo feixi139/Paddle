@@ -13,7 +13,6 @@
 # limitations under the License.
 from __future__ import annotations
 
-import pickle
 import tarfile
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -38,17 +37,27 @@ if TYPE_CHECKING:
 __all__ = []
 
 URL_PREFIX = 'https://dataset.bj.bcebos.com/cifar/'
-CIFAR10_URL = URL_PREFIX + 'cifar-10-python.tar.gz'
-CIFAR10_MD5 = 'c58f30108f718f92721af3b95e74349a'
-CIFAR100_URL = URL_PREFIX + 'cifar-100-python.tar.gz'
-CIFAR100_MD5 = 'eb9058c3a382ffc7106e4002c42a8d85'
+CIFAR10_URL = URL_PREFIX + 'cifar-10-binary.tar.gz'
+CIFAR10_MD5 = 'c32a1d4ab5d03f1284b67883e8d87530'
+CIFAR100_URL = URL_PREFIX + 'cifar-100-binary.tar.gz'
+CIFAR100_MD5 = '03b5dce01913d631647c71ecec9e9cb8'
 
 MODE_FLAG_MAP = {
-    'train10': 'data_batch',
-    'test10': 'test_batch',
-    'train100': 'train',
-    'test100': 'test',
+    'train10': (
+        'data_batch_1.bin',
+        'data_batch_2.bin',
+        'data_batch_3.bin',
+        'data_batch_4.bin',
+        'data_batch_5.bin',
+    ),
+    'test10': ('test_batch.bin',),
+    'train100': ('train.bin',),
+    'test100': ('test.bin',),
 }
+
+CIFAR10_RECORD_SIZE = 3073
+CIFAR100_RECORD_SIZE = 3074
+IMAGE_SIZE = 3072
 
 
 class Cifar10(Dataset[tuple["_ImageDataType", "npt.NDArray[Any]"]]):
@@ -166,24 +175,45 @@ class Cifar10(Dataset[tuple["_ImageDataType", "npt.NDArray[Any]"]]):
         self.data_url = CIFAR10_URL
         self.data_md5 = CIFAR10_MD5
         self.flag = MODE_FLAG_MAP[self.mode + '10']
+        self.record_size = CIFAR10_RECORD_SIZE
+
+    def _get_label(self, record):
+        return int(record[0])
 
     def _load_data(self):
         self.data = []
         with tarfile.open(self.data_file, mode='r') as f:
-            names = (
-                each_item.name for each_item in f if self.flag in each_item.name
-            )
-
-            names = sorted(names)
-
-            for name in names:
-                batch = pickle.load(f.extractfile(name), encoding='bytes')
-
-                data = batch[b'data']
-                labels = batch.get(b'labels', batch.get(b'fine_labels', None))
-                assert labels is not None
-                for sample, label in zip(data, labels):
-                    self.data.append((sample, label))
+            members = {member.name: member for member in f.getmembers()}
+            for expected_name in self.flag:
+                member = next(
+                    (
+                        members[name]
+                        for name in sorted(members)
+                        if name.endswith('/' + expected_name)
+                        or name == expected_name
+                    ),
+                    None,
+                )
+                if member is None:
+                    raise ValueError(
+                        f"Expected CIFAR binary archive member {expected_name} "
+                        f"was not found in {self.data_file}"
+                    )
+                fileobj = f.extractfile(member)
+                assert fileobj is not None
+                data = fileobj.read()
+                if len(data) % self.record_size != 0:
+                    raise ValueError(
+                        f"CIFAR binary file {member.name} size {len(data)} is "
+                        f"not divisible by record size {self.record_size}"
+                    )
+                records = np.frombuffer(data, dtype=np.uint8).reshape(
+                    -1, self.record_size
+                )
+                for record in records:
+                    self.data.append(
+                        (record[-IMAGE_SIZE:].copy(), self._get_label(record))
+                    )
 
     def __getitem__(self, idx: int) -> tuple[_ImageDataType, npt.NDArray[Any]]:
         image, label = self.data[idx]
@@ -284,3 +314,7 @@ class Cifar100(Cifar10):
         self.data_url = CIFAR100_URL
         self.data_md5 = CIFAR100_MD5
         self.flag = MODE_FLAG_MAP[self.mode + '100']
+        self.record_size = CIFAR100_RECORD_SIZE
+
+    def _get_label(self, record):
+        return int(record[1])

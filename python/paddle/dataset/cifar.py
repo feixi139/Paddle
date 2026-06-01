@@ -14,7 +14,7 @@
 """
 CIFAR dataset.
 
-This module will download dataset from https://dataset.bj.bcebos.com/cifar/cifar-10-python.tar.gz and https://dataset.bj.bcebos.com/cifar/cifar-100-python.tar.gz, parse train/test set into
+This module will download CIFAR binary dataset tar files, parse train/test set into
 paddle reader creators.
 
 The CIFAR-10 dataset consists of 60000 32x32 color images in 10 classes,
@@ -27,7 +27,6 @@ images per class.
 
 """
 
-import pickle
 import tarfile
 
 import numpy
@@ -38,32 +37,53 @@ from paddle.utils import deprecated
 __all__ = []
 
 URL_PREFIX = 'https://dataset.bj.bcebos.com/cifar/'
-CIFAR10_URL = URL_PREFIX + 'cifar-10-python.tar.gz'
-CIFAR10_MD5 = 'c58f30108f718f92721af3b95e74349a'
-CIFAR100_URL = URL_PREFIX + 'cifar-100-python.tar.gz'
-CIFAR100_MD5 = 'eb9058c3a382ffc7106e4002c42a8d85'
+CIFAR10_URL = URL_PREFIX + 'cifar-10-binary.tar.gz'
+CIFAR10_MD5 = 'c32a1d4ab5d03f1284b67883e8d87530'
+CIFAR100_URL = URL_PREFIX + 'cifar-100-binary.tar.gz'
+CIFAR100_MD5 = '03b5dce01913d631647c71ecec9e9cb8'
+
+CIFAR10_RECORD_SIZE = 3073
+CIFAR100_RECORD_SIZE = 3074
+IMAGE_SIZE = 3072
 
 
-def reader_creator(filename, sub_name, cycle=False):
-    def read_batch(batch):
-        data = batch[b'data']
-        labels = batch.get(b'labels', batch.get(b'fine_labels', None))
-        assert labels is not None
-        for sample, label in zip(data, labels):
+def reader_creator(filename, sub_names, record_size, label_idx=0, cycle=False):
+    def read_batch(data):
+        if len(data) % record_size != 0:
+            raise ValueError(
+                f"CIFAR binary file size {len(data)} is not divisible by "
+                f"record size {record_size}"
+            )
+        records = numpy.frombuffer(data, dtype=numpy.uint8).reshape(
+            -1, record_size
+        )
+        for record in records:
+            sample = record[-IMAGE_SIZE:]
+            label = record[label_idx]
             yield (sample / 255.0).astype(numpy.float32), int(label)
 
     def reader():
         while True:
             with tarfile.open(filename, mode='r') as f:
-                names = (
-                    each_item.name
-                    for each_item in f
-                    if sub_name in each_item.name
-                )
-
-                for name in names:
-                    batch = pickle.load(f.extractfile(name), encoding='bytes')
-                    yield from read_batch(batch)
+                members = {member.name: member for member in f.getmembers()}
+                for expected_name in sub_names:
+                    member = next(
+                        (
+                            members[name]
+                            for name in sorted(members)
+                            if name.endswith('/' + expected_name)
+                            or name == expected_name
+                        ),
+                        None,
+                    )
+                    if member is None:
+                        raise ValueError(
+                            f"Expected CIFAR binary archive member {expected_name} "
+                            f"was not found in {filename}"
+                        )
+                    fileobj = f.extractfile(member)
+                    assert fileobj is not None
+                    yield from read_batch(fileobj.read())
 
             if not cycle:
                 break
@@ -89,7 +109,9 @@ def train100():
     """
     return reader_creator(
         paddle.dataset.common.download(CIFAR100_URL, 'cifar', CIFAR100_MD5),
-        'train',
+        ('train.bin',),
+        CIFAR100_RECORD_SIZE,
+        label_idx=1,
     )
 
 
@@ -111,7 +133,9 @@ def test100():
     """
     return reader_creator(
         paddle.dataset.common.download(CIFAR100_URL, 'cifar', CIFAR100_MD5),
-        'test',
+        ('test.bin',),
+        CIFAR100_RECORD_SIZE,
+        label_idx=1,
     )
 
 
@@ -135,7 +159,14 @@ def train10(cycle=False):
     """
     return reader_creator(
         paddle.dataset.common.download(CIFAR10_URL, 'cifar', CIFAR10_MD5),
-        'data_batch',
+        (
+            'data_batch_1.bin',
+            'data_batch_2.bin',
+            'data_batch_3.bin',
+            'data_batch_4.bin',
+            'data_batch_5.bin',
+        ),
+        CIFAR10_RECORD_SIZE,
         cycle=cycle,
     )
 
@@ -160,7 +191,8 @@ def test10(cycle=False):
     """
     return reader_creator(
         paddle.dataset.common.download(CIFAR10_URL, 'cifar', CIFAR10_MD5),
-        'test_batch',
+        ('test_batch.bin',),
+        CIFAR10_RECORD_SIZE,
         cycle=cycle,
     )
 

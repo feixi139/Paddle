@@ -51,6 +51,24 @@ SETID_MD5 = 'a5357ecc9cb78c4bef273ce3793fc85c'
 MODE_FLAG_MAP = {'train': 'tstid', 'test': 'trnid', 'valid': 'valid'}
 
 
+def _safe_extract_tar(data_tar: tarfile.TarFile, path: str) -> None:
+    dest_path = os.path.abspath(path)
+    members = data_tar.getmembers()
+    for member in members:
+        if not (member.isfile() or member.isdir()):
+            raise RuntimeError(
+                f"Unsafe tar member type in Flowers dataset archive: {member.name}"
+            )
+
+        member_path = os.path.abspath(os.path.join(dest_path, member.name))
+        if os.path.commonpath([dest_path, member_path]) != dest_path:
+            raise RuntimeError(
+                f"Unsafe tar member path in Flowers dataset archive: {member.name}"
+            )
+
+    data_tar.extractall(path, members=members)
+
+
 class Flowers(Dataset[tuple["_ImageDataType", "npt.NDArray[np.int64]"]]):
     """
     Implementation of `Flowers102 <https://www.robots.ox.ac.uk/~vgg/data/flowers/>`_
@@ -183,7 +201,7 @@ class Flowers(Dataset[tuple["_ImageDataType", "npt.NDArray[np.int64]"]]):
             os.mkdir(self.data_path)
         jpg_path = os.path.join(self.data_path, "jpg")
         if not os.path.exists(jpg_path):
-            data_tar.extractall(self.data_path)
+            _safe_extract_tar(data_tar, self.data_path)
 
         scio = try_import('scipy.io')
         self.labels = scio.loadmat(label_file)['labels'][0]
