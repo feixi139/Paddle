@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_launch_config.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/core/kernel_registry.h"
@@ -420,32 +421,41 @@ void weight_quant_gpu(const GPUContext& dev_ctx,
   int64_t vec_total_n = total_n / kVectorSize;
   int64_t kGridSize =
       max((vec_total_n + kBlockSize - 1) / kBlockSize, int64_t(1));
+  PADDLE_ENFORCE_LE_UINT32_MAX(kGridSize, "weight_quant grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(kBlockSize, "weight_quant block.x");
+  PADDLE_ENFORCE_LE_INT_MAX(total_k, "weight_quant total_k");
+  const uint32_t grid_size = static_cast<uint32_t>(kGridSize);
+  const uint32_t block_size = static_cast<uint32_t>(kBlockSize);
+  const int total_k_int = static_cast<int>(total_k);
   if (algo == "weight_only_int4") {
 #ifdef PADDLE_WITH_HIP
     per_channel_quant_gpu_int4_row_pack<T, kVectorSize>
-        <<<kGridSize, kBlockSize>>>(
-            weight_data, quanted_weight_data, scale_data, total_k, vec_total_n);
+        <<<grid_size, block_size>>>(weight_data,
+                                    quanted_weight_data,
+                                    scale_data,
+                                    total_k_int,
+                                    vec_total_n);
 #else
     if ((arch == 100) || (arch == 90) || (arch == 89) || (arch == 86) ||
         (arch == 80) || (arch == 75)) {
       per_channel_quant_gpu_int4_col_pack<T, kVectorSize>
-          <<<kGridSize, kBlockSize>>>(weight_data,
+          <<<grid_size, block_size>>>(weight_data,
                                       quanted_weight_data,
                                       scale_data,
-                                      total_k,
+                                      total_k_int,
                                       vec_total_n);
     } else if ((arch == 70)) {
       per_channel_quant_gpu_int4_row_pack<T, kVectorSize>
-          <<<kGridSize, kBlockSize>>>(weight_data,
+          <<<grid_size, block_size>>>(weight_data,
                                       quanted_weight_data,
                                       scale_data,
-                                      total_k,
+                                      total_k_int,
                                       vec_total_n);
     }
 #endif
   } else {
-    per_channel_quant_gpu<T, kVectorSize><<<kGridSize, kBlockSize>>>(
-        weight_data, quanted_weight_data, scale_data, total_k, vec_total_n);
+    per_channel_quant_gpu<T, kVectorSize><<<grid_size, block_size>>>(
+        weight_data, quanted_weight_data, scale_data, total_k_int, vec_total_n);
   }
 }
 

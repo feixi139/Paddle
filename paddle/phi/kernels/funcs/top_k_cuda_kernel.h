@@ -20,11 +20,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 // Include top_k_function_cuda.h to get CUB NumericTraits for float16/bfloat16.
 // This header includes cub/cub.cuh and defines the required traits.
 #include "paddle/phi/kernels/funcs/top_k_function_cuda.h"
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/backends/gpu/gpu_info.h"
 #include "paddle/phi/common/memory_utils.h"
@@ -77,7 +79,9 @@ inline bool getGridFromTiles(int64_t gridTiles, dim3* grid) {
       gridZ = gridTiles > MAX_GRID_SIZE ? MAX_GRID_SIZE : gridTiles;
     }
   }
-  *grid = dim3(gridX, gridY, gridZ);
+  *grid = dim3(static_cast<uint32_t>(gridX),
+               static_cast<uint32_t>(gridY),
+               static_cast<uint32_t>(gridZ));
   return true;
 }
 
@@ -1588,8 +1592,12 @@ TensorInfo<T, IndexType> getTensorInfo(const phi::DenseTensor& tensor) {
   info.data = reinterpret_cast<T*>(const_cast<void*>(tensor.data()));
   info.dims = tensor.dims().size();
   for (int i = 0; i < info.dims; i++) {
-    info.sizes[i] = tensor.dims()[i];
-    info.strides[i] = tensor.strides()[i];
+    if constexpr (std::is_same_v<IndexType, uint32_t>) {
+      PADDLE_ENFORCE_LE_UINT32_MAX(tensor.dims()[i], "topk tensor dim");
+      PADDLE_ENFORCE_LE_UINT32_MAX(tensor.strides()[i], "topk tensor stride");
+    }
+    info.sizes[i] = static_cast<IndexType>(tensor.dims()[i]);
+    info.strides[i] = static_cast<IndexType>(tensor.strides()[i]);
   }
   return info;
 }
@@ -1615,6 +1623,9 @@ void sortKeyValueInplace(const Context& dev_ctx,
   auto stream = dev_ctx.stream();
 
   if (sliceSize <= 1) return;
+
+  PADDLE_ENFORCE_LE_UINT32_MAX(numSlices, "topk sort numSlices");
+  PADDLE_ENFORCE_LE_UINT32_MAX(sliceSize, "topk sort sliceSize");
 
   auto keyInfo = getTensorInfo<T, uint32_t>(*out);
   auto valueInfo = getTensorInfo<int64_t, uint32_t>(*indices);
@@ -1652,42 +1663,43 @@ void sortKeyValueInplace(const Context& dev_ctx,
 
   if (sliceSize <= 32) {
     // Bitonic sort (unstable)
-#define LAUNCH_BITONIC(DIM)                          \
-  launch_bitonic_sort<T, uint32_t, DIM>(keyInfo,     \
-                                        numSlices,   \
-                                        sliceSize,   \
-                                        strideKey,   \
-                                        valueInfo,   \
-                                        strideValue, \
-                                        largest,     \
+#define LAUNCH_BITONIC(DIM)                                                 \
+  launch_bitonic_sort<T, uint32_t, DIM>(keyInfo,                            \
+                                        static_cast<uint32_t>(numSlices),   \
+                                        static_cast<uint32_t>(sliceSize),   \
+                                        static_cast<uint32_t>(strideKey),   \
+                                        valueInfo,                          \
+                                        static_cast<uint32_t>(strideValue), \
+                                        largest,                            \
                                         stream)
     TOPK_SORT_DIM_DISPATCH(LAUNCH_BITONIC);
 #undef LAUNCH_BITONIC
   } else if (sliceSize <= 128) {
     // WarpMergeSort (stable, uses CUB WarpMergeSort)
-#define LAUNCH_WARP(DIM)                                \
-  launch_warp_merge_sort<T, uint32_t, DIM>(keyInfo,     \
-                                           numSlices,   \
-                                           sliceSize,   \
-                                           strideKey,   \
-                                           valueInfo,   \
-                                           strideValue, \
-                                           largest,     \
+#define LAUNCH_WARP(DIM)                                                       \
+  launch_warp_merge_sort<T, uint32_t, DIM>(keyInfo,                            \
+                                           static_cast<uint32_t>(numSlices),   \
+                                           static_cast<uint32_t>(sliceSize),   \
+                                           static_cast<uint32_t>(strideKey),   \
+                                           valueInfo,                          \
+                                           static_cast<uint32_t>(strideValue), \
+                                           largest,                            \
                                            stream)
     TOPK_SORT_DIM_DISPATCH(LAUNCH_WARP);
 #undef LAUNCH_WARP
   } else {
     // BlockRadixSort (for sizes up to 4096)
     bool descending = largest;
-#define LAUNCH_RADIX(DIM)                                 \
-  launch_medium_radix_sort<T, uint32_t, DIM>(keyInfo,     \
-                                             numSlices,   \
-                                             sliceSize,   \
-                                             strideKey,   \
-                                             valueInfo,   \
-                                             strideValue, \
-                                             descending,  \
-                                             stream)
+#define LAUNCH_RADIX(DIM)                     \
+  launch_medium_radix_sort<T, uint32_t, DIM>( \
+      keyInfo,                                \
+      static_cast<uint32_t>(numSlices),       \
+      static_cast<uint32_t>(sliceSize),       \
+      static_cast<uint32_t>(strideKey),       \
+      valueInfo,                              \
+      static_cast<uint32_t>(strideValue),     \
+      descending,                             \
+      stream)
     TOPK_SORT_DIM_DISPATCH(LAUNCH_RADIX);
 #undef LAUNCH_RADIX
   }
@@ -1834,10 +1846,11 @@ void launch(TensorInfo<const T, IndexType> input,
   assert(ok);
   (void)ok;
   int warp_size = TOPK_WARP_SIZE;
-  dim3 block(
+  int64_t block64 =
       std::min(topk_ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) *
                    (int64_t)warp_size,
-               (int64_t)1024));
+               (int64_t)1024);
+  dim3 block(static_cast<uint32_t>(block64));
   gatherTopK<T, IndexType, Dim, /*WithKthValues=*/false>
       <<<grid, block, 0, stream>>>(input,
                                    inputSliceSize,
@@ -2221,10 +2234,11 @@ int get_items_per_thread(uint64_t num_slices,
   int64_t items_per_thread =
       topk_ceil_div((int64_t)(slice_size * num_slices),
                     (int64_t)(mpc * blocks_per_mp * BLOCK_THREADS));
-  items_per_thread = std::max(
+  PADDLE_ENFORCE_LE_INT_MAX(items_per_thread, "topk items_per_thread");
+  int items_per_thread_int = std::max(
       MIN_ITEMS_PER_THREAD,
       std::min(static_cast<int>(items_per_thread), MAX_ITEMS_PER_THREAD));
-  return items_per_thread;
+  return items_per_thread_int;
 }
 
 class BlockIdxToKey {
@@ -2257,9 +2271,14 @@ void launch(TensorInfo<const T, IndexType> input,
   int items_per_block = items_per_thread * BLOCK_THREADS;
 
   using Bitwise = typename TopKTypeConfig<T>::RadixType;
-  uint32_t blocks_per_slice =
+  int64_t blocks_per_slice64 =
       topk_ceil_div((int64_t)inputSliceSize, (int64_t)items_per_block);
-  uint32_t num_blocks = numInputSlices * blocks_per_slice;
+  PADDLE_ENFORCE_LE_UINT32_MAX(blocks_per_slice64, "topk blocks_per_slice");
+  uint32_t blocks_per_slice = static_cast<uint32_t>(blocks_per_slice64);
+  uint64_t num_blocks64 = static_cast<uint64_t>(numInputSlices) *
+                          static_cast<uint64_t>(blocks_per_slice);
+  PADDLE_ENFORCE_LE_UINT32_MAX(num_blocks64, "topk num blocks");
+  uint32_t num_blocks = static_cast<uint32_t>(num_blocks64);
 
   // Temporary storage allocation using phi::memory_utils
   auto phi_stream = phi::Stream(reinterpret_cast<phi::StreamId>(stream));
@@ -2280,13 +2299,16 @@ void launch(TensorInfo<const T, IndexType> input,
   auto ks_to_find_buffer = phi::memory_utils::Alloc(
       place, 2 * numInputSlices * sizeof(uint32_t), phi_stream);
   uint32_t* ks_to_find = reinterpret_cast<uint32_t*>(ks_to_find_buffer->ptr());
-  uint32_t k_to_find =
-      largest ? inputSliceSize - outputSliceSize + 1 : outputSliceSize;
+  uint64_t k_to_find64 = static_cast<uint64_t>(
+      largest ? inputSliceSize - outputSliceSize + 1 : outputSliceSize);
+  PADDLE_ENFORCE_LE_UINT32_MAX(k_to_find64, "topk k_to_find");
+  uint32_t k_to_find = static_cast<uint32_t>(k_to_find64);
+  int64_t fill_grid64 =
+      std::min(((int64_t)numInputSlices + 511) / 512, (int64_t)1073741824);
+  PADDLE_ENFORCE_LE_UINT32_MAX(fill_grid64, "topk fill grid.x");
+  uint32_t fill_grid = static_cast<uint32_t>(fill_grid64);
   fill<uint32_t>
-      <<<std::min(((int64_t)numInputSlices + 511) / 512, (int64_t)1073741824),
-         512,
-         0,
-         stream>>>(ks_to_find, k_to_find, numInputSlices);
+      <<<fill_grid, 512, 0, stream>>>(ks_to_find, k_to_find, numInputSlices);
 
   auto desired_buffer = phi::memory_utils::Alloc(
       place, 2 * numInputSlices * sizeof(Bitwise), phi_stream);
@@ -2375,11 +2397,12 @@ void launch(TensorInfo<const T, IndexType> input,
   desired = desired_in;
 
 #if TOPK_CUB_SUPPORTS_SCAN_BY_KEY()
-  computeBlockwiseKthCounts<Bitwise>
-      <<<std::min(((int64_t)numInputSlices + 255) / 256, (int64_t)1073741824),
-         256,
-         0,
-         stream>>>(desired, counts, num_blocks, blocks_per_slice, kthCounts);
+  int64_t kth_counts_grid64 =
+      std::min(((int64_t)numInputSlices + 255) / 256, (int64_t)1073741824);
+  PADDLE_ENFORCE_LE_UINT32_MAX(kth_counts_grid64, "topk kth counts grid.x");
+  uint32_t kth_counts_grid = static_cast<uint32_t>(kth_counts_grid64);
+  computeBlockwiseKthCounts<Bitwise><<<kth_counts_grid, 256, 0, stream>>>(
+      desired, counts, num_blocks, blocks_per_slice, kthCounts);
 
   // Use cub::DeviceScan::InclusiveSumByKey
   using counting_iter_t = cub::CountingInputIterator<uint32_t>;
@@ -2458,10 +2481,11 @@ void launch(TensorInfo<const T, IndexType> input,
     assert(ok2);
     (void)ok2;
     int warp_size = TOPK_WARP_SIZE;
-    dim3 block2(
+    int64_t block64 =
         std::min(topk_ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) *
                      (int64_t)warp_size,
-                 (int64_t)1024));
+                 (int64_t)1024);
+    dim3 block2(static_cast<uint32_t>(block64));
     sbtopk::gatherTopK<T, IndexType, Dim, /*WithKthValues=*/true>
         <<<grid2, block2, 0, stream>>>(input,
                                        inputSliceSize,

@@ -14,6 +14,7 @@
 
 #include "paddle/common/errors.h"
 #include "paddle/phi/api/include/tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/full_kernel.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
@@ -351,9 +352,15 @@ void FusedFeedForwardGradKernel(const Context& dev_ctx,
       funcs::CreateMatrixDescriptor(phi::RowMatrixFromVector(x_dim), 0, false);
 
   auto linear1_weight_dim = linear1_weight.dims();
-  int d_model = linear1_weight_dim[0];
-  int dim_feedforward = linear1_weight_dim[linear1_weight_dim.size() - 1];
-  int bsz_seq = mat_dim_x.batch_size_ * mat_dim_x.height_;
+  PADDLE_ENFORCE_LE_INT_MAX(linear1_weight_dim[0],
+                            "fused feedforward grad d_model");
+  PADDLE_ENFORCE_LE_INT_MAX(linear1_weight_dim[linear1_weight_dim.size() - 1],
+                            "fused feedforward grad dim_feedforward");
+  int64_t bsz_seq = mat_dim_x.batch_size_ * mat_dim_x.height_;
+  PADDLE_ENFORCE_LE_INT_MAX(bsz_seq, "fused feedforward grad bsz_seq");
+  int d_model = static_cast<int>(linear1_weight_dim[0]);
+  int dim_feedforward =
+      static_cast<int>(linear1_weight_dim[linear1_weight_dim.size() - 1]);
 
   FFNGrad<T, Context>(dev_ctx,
                       out_grad,
@@ -384,7 +391,7 @@ void FusedFeedForwardGradKernel(const Context& dev_ctx,
                       d_ln1_bias,
                       d_ln2_scale,
                       d_ln2_bias,
-                      bsz_seq,
+                      static_cast<int>(bsz_seq),
                       d_model,
                       dim_feedforward,
                       dropout_param1,

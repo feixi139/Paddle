@@ -16,6 +16,7 @@
 #include <cuda_fp8.h>
 #include <cstdint>
 #include <vector>
+#include "paddle/common/enforce.h"
 #include "paddle/common/flags.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/core/utils/data_type.h"
@@ -805,19 +806,29 @@ void FP8QuantBlockWiseKernelImpl(const Context &dev_ctx,
     const size_t min_block_x = 1024;
     const size_t gridx = std::min(min_grid_x, src_rows);
     const size_t blockx = std::min(min_block_x, (src_cols + 127) / 128 * 32);
+    PADDLE_ENFORCE_LE_UINT32_MAX(gridx, "fp8 quant blockwise grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(blockx, "fp8 quant blockwise block.x");
+    PADDLE_ENFORCE_LE_INT_MAX(src_rows, "fp8 quant blockwise rows");
+    PADDLE_ENFORCE_LE_INT_MAX(src_cols, "fp8 quant blockwise cols");
+    PADDLE_ENFORCE_LE_INT_MAX(quanted_cols, "fp8 quant blockwise padded rows");
+    const uint32_t grid_x = static_cast<uint32_t>(gridx);
+    const uint32_t block_x = static_cast<uint32_t>(blockx);
+    const int src_rows_int = static_cast<int>(src_rows);
+    const int src_cols_int = static_cast<int>(src_cols);
+    const int quanted_cols_int = static_cast<int>(quanted_cols);
 
     quant_per_token_per_block<NvType,
                               ScaleT,
                               output_scale_transpose,
                               using_pow2_scale,
                               using_ue8m0_scale>
-        <<<gridx, blockx, 0, dev_ctx.stream()>>>(
+        <<<grid_x, block_x, 0, dev_ctx.stream()>>>(
             reinterpret_cast<const NvType *>(X.data<T>()),
             reinterpret_cast<__nv_fp8_e4m3 *>(out->data<phi::float8_e4m3fn>()),
             reinterpret_cast<ScaleT *>(scale->data<ScaleT>()),
-            src_rows,
-            src_cols,
-            quanted_cols,
+            src_rows_int,
+            src_cols_int,
+            quanted_cols_int,
             epsilon);
   } else if (src_rows % 128 != 0) {
     PD_CHECK(
@@ -835,13 +846,17 @@ void FP8QuantBlockWiseKernelImpl(const Context &dev_ctx,
     const size_t min_block_x = 1024;
     const size_t gridx = std::min(min_grid_x, src_rows);
     const size_t blockx = std::min(min_block_x, src_cols / 128 * 32);
+    PADDLE_ENFORCE_LE_UINT32_MAX(gridx, "fp8 quant blockwise padding grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(blockx, "fp8 quant blockwise padding block.x");
+    const uint32_t grid_x = static_cast<uint32_t>(gridx);
+    const uint32_t block_x = static_cast<uint32_t>(blockx);
 
     quant_per_token_per_block_padding<NvType,
                                       ScaleT,
                                       output_scale_transpose,
                                       using_pow2_scale,
                                       using_ue8m0_scale>
-        <<<gridx, blockx, 0, dev_ctx.stream()>>>(
+        <<<grid_x, block_x, 0, dev_ctx.stream()>>>(
             reinterpret_cast<const NvType *>(X.data<T>()),
             reinterpret_cast<__nv_fp8_e4m3 *>(out->data<phi::float8_e4m3fn>()),
             reinterpret_cast<ScaleT *>(scale->data<ScaleT>()),
@@ -858,7 +873,9 @@ void FP8QuantBlockWiseKernelImpl(const Context &dev_ctx,
     } else {
       block.x = 256;
     }
-    grid.x = (src_cols / k_block_span) * (src_rows / k_block_span);
+    const size_t gridx = (src_cols / k_block_span) * (src_rows / k_block_span);
+    PADDLE_ENFORCE_LE_UINT32_MAX(gridx, "fp8 quant blockwise aligned grid.x");
+    grid.x = static_cast<uint32_t>(gridx);
 
     auto kernel = using_1x128_vec_quant
                       ? quantize_1x128_kernel<NvType,

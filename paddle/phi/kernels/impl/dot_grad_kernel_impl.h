@@ -17,6 +17,7 @@ limitations under the License. */
 #include "glog/logging.h"
 
 #include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/complex_kernel.h"
 #include "paddle/phi/kernels/full_kernel.h"
 #include "paddle/phi/kernels/funcs/complex_functors.h"
@@ -50,7 +51,8 @@ struct DotGradFunction<Context, T, funcs::EnableComplex<T>> {
       if (tensor_dx) {
         auto y = EigenVector<T>::Flatten(*tensor_y);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 1> size(tensor_dx->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dx->numel(), "dot grad dx numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_dx->numel()));
 
         ConjKernel<T, Context>(dev_ctx, *tensor_y, tensor_dx);
 
@@ -61,7 +63,8 @@ struct DotGradFunction<Context, T, funcs::EnableComplex<T>> {
       if (tensor_dy) {
         auto x = EigenVector<T>::Flatten(*tensor_x);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 1> size(tensor_dy->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dy->numel(), "dot grad dy numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_dy->numel()));
 
         ConjKernel<T, Context>(dev_ctx, *tensor_x, tensor_dy);
 
@@ -75,7 +78,8 @@ struct DotGradFunction<Context, T, funcs::EnableComplex<T>> {
         dev_ctx.template Alloc<T>(tensor_dx);
         auto y = EigenMatrix<T>::From(*tensor_y);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 2> size(1, tensor_dx->dims()[1]);
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dx->dims()[1], "dot grad dx dim");
+        Eigen::DSizes<int, 2> size(1, static_cast<int>(tensor_dx->dims()[1]));
 
         ConjKernel<T, Context>(dev_ctx, *tensor_y, tensor_dx);
 
@@ -87,7 +91,8 @@ struct DotGradFunction<Context, T, funcs::EnableComplex<T>> {
         dev_ctx.template Alloc<T>(tensor_dy);
         auto x = EigenMatrix<T>::From(*tensor_x);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 2> size(1, tensor_dy->dims()[1]);
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dy->dims()[1], "dot grad dy dim");
+        Eigen::DSizes<int, 2> size(1, static_cast<int>(tensor_dy->dims()[1]));
 
         ConjKernel<T, Context>(dev_ctx, *tensor_x, tensor_dy);
 
@@ -148,7 +153,8 @@ struct DotGradFunction<Context, T, funcs::DisableComplex<T>> {
         auto y = EigenVector<T>::Flatten(*tensor_y);
         auto dx = EigenVector<T>::Flatten(*tensor_dx);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 1> size(tensor_dx->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dx->numel(), "dot grad dx numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_dx->numel()));
         dx.device(dev) = y * dout.broadcast(size);
       }
 
@@ -156,7 +162,8 @@ struct DotGradFunction<Context, T, funcs::DisableComplex<T>> {
         auto x = EigenVector<T>::Flatten(*tensor_x);
         auto dy = EigenVector<T>::Flatten(*tensor_dy);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 1> size(tensor_dy->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dy->numel(), "dot grad dy numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_dy->numel()));
         dy.device(dev) = x * dout.broadcast(size);
       }
     } else {
@@ -167,7 +174,8 @@ struct DotGradFunction<Context, T, funcs::DisableComplex<T>> {
         auto y = EigenMatrix<T>::From(*tensor_y);
         auto dx = EigenMatrix<T>::From(*tensor_dx);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 2> size(1, tensor_dx->dims()[1]);
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dx->dims()[1], "dot grad dx dim");
+        Eigen::DSizes<int, 2> size(1, static_cast<int>(tensor_dx->dims()[1]));
         dx.device(dev) = y * dout.broadcast(size);
       }
 
@@ -176,7 +184,8 @@ struct DotGradFunction<Context, T, funcs::DisableComplex<T>> {
         auto x = EigenMatrix<T>::From(*tensor_x);
         auto dy = EigenMatrix<T>::From(*tensor_dy);
         auto& dev = *dev_ctx.eigen_device();
-        Eigen::DSizes<int, 2> size(1, tensor_dy->dims()[1]);
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_dy->dims()[1], "dot grad dy dim");
+        Eigen::DSizes<int, 2> size(1, static_cast<int>(tensor_dy->dims()[1]));
         dy.device(dev) = x * dout.broadcast(size);
       }
     }
@@ -243,7 +252,8 @@ struct DotDoubleGradFunction<Context, T, funcs::EnableComplex<T>> {
       if (tensor_dx && tensor_ddy) {
         dev_ctx.template Alloc<T>(tensor_dx);
         auto ddy = EigenVector<T>::Flatten(*tensor_ddy);
-        Eigen::DSizes<int, 1> size(tensor_ddy->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_ddy->numel(), "dot grad ddy numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_ddy->numel()));
         auto dx = EigenVector<T>::Flatten(*tensor_dx);
         auto dout = EigenVector<T>::Flatten(tensor_dout_help);
         dx.device(dev) = ddy * dout.broadcast(size);
@@ -258,7 +268,8 @@ struct DotDoubleGradFunction<Context, T, funcs::EnableComplex<T>> {
       if (tensor_dy && tensor_ddx) {
         dev_ctx.template Alloc<T>(tensor_dy);
         auto ddx = EigenVector<T>::Flatten(*tensor_ddx);
-        Eigen::DSizes<int, 1> size(tensor_ddx->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_ddx->numel(), "dot grad ddx numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_ddx->numel()));
         auto dy = EigenVector<T>::Flatten(*tensor_dy);
         auto dout = EigenVector<T>::Flatten(tensor_dout_help);
         dy.device(dev) = ddx * dout.broadcast(size);
@@ -449,7 +460,8 @@ struct DotDoubleGradFunction<Context, T, funcs::DisableComplex<T>> {
       if (tensor_dx && tensor_ddy) {
         dev_ctx.template Alloc<T>(tensor_dx);
         auto ddy = EigenVector<T>::Flatten(*tensor_ddy);
-        Eigen::DSizes<int, 1> size(tensor_ddy->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_ddy->numel(), "dot grad ddy numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_ddy->numel()));
         auto dx = EigenVector<T>::Flatten(*tensor_dx);
         dx.device(dev) = ddy * dout.broadcast(size);
       } else if (tensor_dx && !tensor_ddy) {
@@ -460,7 +472,8 @@ struct DotDoubleGradFunction<Context, T, funcs::DisableComplex<T>> {
       if (tensor_dy && tensor_ddx) {
         dev_ctx.template Alloc<T>(tensor_dy);
         auto ddx = EigenVector<T>::Flatten(*tensor_ddx);
-        Eigen::DSizes<int, 1> size(tensor_ddx->numel());
+        PADDLE_ENFORCE_LE_INT_MAX(tensor_ddx->numel(), "dot grad ddx numel");
+        Eigen::DSizes<int, 1> size(static_cast<int>(tensor_ddx->numel()));
         auto dy = EigenVector<T>::Flatten(*tensor_dy);
         dy.device(dev) = ddx * dout.broadcast(size);
       } else if (tensor_dy && !tensor_ddx) {
@@ -654,7 +667,9 @@ struct DotTripleGradFunction<Context, T, funcs::EnableComplex<T>> {
         if (out_tensor_d_y && in_tensor_d_ddout) {
           dev_ctx.template Alloc<T>(out_tensor_d_y);
           auto ddx = EigenVector<T>::Flatten(in_tensor_ddx_help);
-          Eigen::DSizes<int, 1> size(in_tensor_ddx->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_ddx->numel(),
+                                    "dot grad ddx numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_ddx->numel()));
           auto d_y = EigenVector<T>::Flatten(*out_tensor_d_y);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
           d_y.device(dev) = ddx * d_ddout.broadcast(size);
@@ -673,7 +688,9 @@ struct DotTripleGradFunction<Context, T, funcs::EnableComplex<T>> {
         if (out_tensor_d_x && in_tensor_d_ddout) {
           dev_ctx.template Alloc<T>(out_tensor_d_x);
           auto ddy = EigenVector<T>::Flatten(in_tensor_ddy_help);
-          Eigen::DSizes<int, 1> size(in_tensor_ddy->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_ddy->numel(),
+                                    "dot grad ddy numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_ddy->numel()));
           auto d_x = EigenVector<T>::Flatten(*out_tensor_d_x);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
           d_x.device(dev) = ddy * d_ddout.broadcast(size);
@@ -697,7 +714,8 @@ struct DotTripleGradFunction<Context, T, funcs::EnableComplex<T>> {
           auto dout = EigenVector<T>::Flatten(in_tensor_dout_help);
           auto d_dx = EigenVector<T>::Flatten(*in_tensor_d_dx);
           auto d_ddy = EigenVector<T>::Flatten(*out_tensor_d_ddy);
-          Eigen::DSizes<int, 1> size(in_tensor_x->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_x->numel(), "dot grad x numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_x->numel()));
           d_ddy.device(dev) = (dout.broadcast(size) * d_dx);
           d_ddy_flag = true;
         }
@@ -709,7 +727,8 @@ struct DotTripleGradFunction<Context, T, funcs::EnableComplex<T>> {
           auto dout = EigenVector<T>::Flatten(in_tensor_dout_help);
           auto d_dy = EigenVector<T>::Flatten(*in_tensor_d_dy);
           auto d_ddx = EigenVector<T>::Flatten(*out_tensor_d_ddx);
-          Eigen::DSizes<int, 1> size(in_tensor_y->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_y->numel(), "dot grad y numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_y->numel()));
           d_ddx.device(dev) = (dout.broadcast(size) * d_dy);
           d_ddx_flag = true;
         }
@@ -720,7 +739,8 @@ struct DotTripleGradFunction<Context, T, funcs::EnableComplex<T>> {
           dev_ctx.template Alloc<T>(out_tensor_d_ddx);
           auto y = EigenVector<T>::Flatten(in_tensor_y_help);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
-          Eigen::DSizes<int, 1> size(in_tensor_y->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_y->numel(), "dot grad y numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_y->numel()));
           auto d_ddx = EigenVector<T>::Flatten(*out_tensor_d_ddx);
           if (d_ddx_flag) {
             d_ddx.device(dev) += (y * d_ddout.broadcast(size));
@@ -732,7 +752,8 @@ struct DotTripleGradFunction<Context, T, funcs::EnableComplex<T>> {
           dev_ctx.template Alloc<T>(out_tensor_d_ddy);
           auto x = EigenVector<T>::Flatten(in_tensor_x_help);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
-          Eigen::DSizes<int, 1> size(in_tensor_x->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_x->numel(), "dot grad x numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_x->numel()));
           auto d_ddy = EigenVector<T>::Flatten(*out_tensor_d_ddy);
           if (d_ddy_flag) {
             d_ddy.device(dev) += (x * d_ddout.broadcast(size));
@@ -1035,7 +1056,9 @@ struct DotTripleGradFunction<Context, T, funcs::DisableComplex<T>> {
         if (out_tensor_d_y && in_tensor_d_ddout) {
           dev_ctx.template Alloc<T>(out_tensor_d_y);
           auto ddx = EigenVector<T>::Flatten(*in_tensor_ddx);
-          Eigen::DSizes<int, 1> size(in_tensor_ddx->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_ddx->numel(),
+                                    "dot grad ddx numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_ddx->numel()));
           auto d_y = EigenVector<T>::Flatten(*out_tensor_d_y);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
           d_y.device(dev) = ddx * d_ddout.broadcast(size);
@@ -1054,7 +1077,9 @@ struct DotTripleGradFunction<Context, T, funcs::DisableComplex<T>> {
         if (out_tensor_d_x && in_tensor_d_ddout) {
           dev_ctx.template Alloc<T>(out_tensor_d_x);
           auto ddy = EigenVector<T>::Flatten(*in_tensor_ddy);
-          Eigen::DSizes<int, 1> size(in_tensor_ddy->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_ddy->numel(),
+                                    "dot grad ddy numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_ddy->numel()));
           auto d_x = EigenVector<T>::Flatten(*out_tensor_d_x);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
           d_x.device(dev) = ddy * d_ddout.broadcast(size);
@@ -1078,7 +1103,8 @@ struct DotTripleGradFunction<Context, T, funcs::DisableComplex<T>> {
           auto dout = EigenVector<T>::Flatten(*in_tensor_dout);
           auto d_dx = EigenVector<T>::Flatten(*in_tensor_d_dx);
           auto d_ddy = EigenVector<T>::Flatten(*out_tensor_d_ddy);
-          Eigen::DSizes<int, 1> size(in_tensor_x->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_x->numel(), "dot grad x numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_x->numel()));
           d_ddy.device(dev) = (dout.broadcast(size) * d_dx);
           d_ddy_flag = true;
         }
@@ -1090,7 +1116,8 @@ struct DotTripleGradFunction<Context, T, funcs::DisableComplex<T>> {
           auto dout = EigenVector<T>::Flatten(*in_tensor_dout);
           auto d_dy = EigenVector<T>::Flatten(*in_tensor_d_dy);
           auto d_ddx = EigenVector<T>::Flatten(*out_tensor_d_ddx);
-          Eigen::DSizes<int, 1> size(in_tensor_y->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_y->numel(), "dot grad y numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_y->numel()));
           d_ddx.device(dev) = (dout.broadcast(size) * d_dy);
           d_ddx_flag = true;
         }
@@ -1101,7 +1128,8 @@ struct DotTripleGradFunction<Context, T, funcs::DisableComplex<T>> {
           dev_ctx.template Alloc<T>(out_tensor_d_ddx);
           auto y = EigenVector<T>::Flatten(*in_tensor_y);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
-          Eigen::DSizes<int, 1> size(in_tensor_y->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_y->numel(), "dot grad y numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_y->numel()));
           auto d_ddx = EigenVector<T>::Flatten(*out_tensor_d_ddx);
           if (d_ddx_flag) {
             d_ddx.device(dev) += (y * d_ddout.broadcast(size));
@@ -1113,7 +1141,8 @@ struct DotTripleGradFunction<Context, T, funcs::DisableComplex<T>> {
           dev_ctx.template Alloc<T>(out_tensor_d_ddy);
           auto x = EigenVector<T>::Flatten(*in_tensor_x);
           auto d_ddout = EigenVector<T>::Flatten(*in_tensor_d_ddout);
-          Eigen::DSizes<int, 1> size(in_tensor_x->numel());
+          PADDLE_ENFORCE_LE_INT_MAX(in_tensor_x->numel(), "dot grad x numel");
+          Eigen::DSizes<int, 1> size(static_cast<int>(in_tensor_x->numel()));
           auto d_ddy = EigenVector<T>::Flatten(*out_tensor_d_ddy);
           if (d_ddy_flag) {
             d_ddy.device(dev) += (x * d_ddout.broadcast(size));

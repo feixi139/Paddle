@@ -539,6 +539,8 @@ struct gpu_gather_scatter_functor {
     auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
 
     int64_t ndim = index.dims().size();
+    PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+    int ndim_int = static_cast<int>(ndim);
 
     DenseTensor shape_stride_dev;
     shape_stride_dev.Resize({3 * ndim});
@@ -548,7 +550,7 @@ struct gpu_gather_scatter_functor {
       shape_stride_host.Resize({3 * ndim});
       dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
       int64_t* host_data = shape_stride_host.data<int64_t>();
-      for (int64_t i = 0; i < ndim; i++) {
+      for (int i = 0; i < ndim_int; i++) {
         host_data[i] = index_dims[i];
         host_data[i + ndim] = src.strides()[i];
         host_data[i + (ndim << 1)] = self.strides()[i];
@@ -580,7 +582,7 @@ struct gpu_gather_scatter_functor {
                                                       self_select_dim_size,
                                                       index_size,
                                                       dim,
-                                                      ndim);
+                                                      ndim_int);
       // Stage 2: Only the max tid in stage 1 can write src to dst.
       ScatterWriteByWinnersKernel<tensor_t, index_t, func_t>
           <<<grid, block, shared_mem_bytes, stream>>>(self_data,
@@ -591,7 +593,7 @@ struct gpu_gather_scatter_functor {
                                                       self_select_dim_size,
                                                       index_size,
                                                       dim,
-                                                      ndim);
+                                                      ndim_int);
       return;
     }
 
@@ -620,7 +622,7 @@ struct gpu_gather_scatter_functor {
           init_val,
           index_size,
           dim,
-          ndim,
+          ndim_int,
           atomic_cnt_buffer);
     }
 
@@ -633,7 +635,7 @@ struct gpu_gather_scatter_functor {
                                                     src_select_dim_size,
                                                     index_size,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     reduce_op,
                                                     atomic_cnt_buffer);
     if (method_name == "mean") {
@@ -806,6 +808,8 @@ void gpu_scatter_input_grad_kernel(DenseTensor self,
   auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
 
   int64_t ndim = index_dims.size();
+  PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+  int ndim_int = static_cast<int>(ndim);
 
   DenseTensor shape_stride_dev;
   shape_stride_dev.Resize({2 * ndim});
@@ -815,7 +819,7 @@ void gpu_scatter_input_grad_kernel(DenseTensor self,
     shape_stride_host.Resize({2 * ndim});
     dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
     int64_t* host_data = shape_stride_host.data<int64_t>();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim_int; i++) {
       host_data[i] = index_dims[i];
       host_data[i + ndim] = grad.strides()[i];
     }
@@ -832,7 +836,7 @@ void gpu_scatter_input_grad_kernel(DenseTensor self,
 
   ScatterInputGradGPUKernel<tensor_t, index_t>
       <<<grid, block, shared_mem_bytes, stream>>>(
-          grad_data, index_data, shape_strides, dim, ndim, index_size);
+          grad_data, index_data, shape_strides, dim, ndim_int, index_size);
 }
 
 namespace {
@@ -976,6 +980,8 @@ void gpu_scatter_mul_min_max_input_grad_kernel(DenseTensor self,
   int* aux_buffer = aux_tensor.data<int>();
 
   int64_t ndim = index_dims.size();
+  PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+  int ndim_int = static_cast<int>(ndim);
 
   DenseTensor shape_stride_dev;
   shape_stride_dev.Resize({3 * ndim});
@@ -985,7 +991,7 @@ void gpu_scatter_mul_min_max_input_grad_kernel(DenseTensor self,
     shape_stride_host.Resize({3 * ndim});
     dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
     int64_t* host_data = shape_stride_host.data<int64_t>();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim_int; i++) {
       host_data[i] = index_dims[i];
       // notice that the ordering is different from forward, since
       // value.strides() is not used for mul
@@ -1016,7 +1022,7 @@ void gpu_scatter_mul_min_max_input_grad_kernel(DenseTensor self,
                                                     x_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     grad.numel(),
                                                     aux_buffer);
@@ -1027,7 +1033,7 @@ void gpu_scatter_mul_min_max_input_grad_kernel(DenseTensor self,
                                                     x_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     aux_buffer);
   } else if (reduce == "amin" || reduce == "amax") {
@@ -1043,7 +1049,7 @@ void gpu_scatter_mul_min_max_input_grad_kernel(DenseTensor self,
                                                     x_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     grad.numel(),
                                                     aux_buffer);
@@ -1055,7 +1061,7 @@ void gpu_scatter_mul_min_max_input_grad_kernel(DenseTensor self,
                                                     self_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     aux_buffer);
   }
@@ -1120,6 +1126,8 @@ void gpu_scatter_mean_input_grad_kernel(DenseTensor self,
       n, block, "gpu_scatter_mean_input_grad_kernel launch grid");
 
   int64_t ndim = index_dims.size();
+  PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+  int ndim_int = static_cast<int>(ndim);
 
   DenseTensor shape_stride_dev;
   shape_stride_dev.Resize({2 * ndim});
@@ -1129,7 +1137,7 @@ void gpu_scatter_mean_input_grad_kernel(DenseTensor self,
     shape_stride_host.Resize({2 * ndim});
     dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
     int64_t* host_data = shape_stride_host.data<int64_t>();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim_int; i++) {
       host_data[i] = index_dims[i];
       host_data[i + ndim] = grad.strides()[i];
     }
@@ -1154,7 +1162,7 @@ void gpu_scatter_mean_input_grad_kernel(DenseTensor self,
                                                   nullptr,
                                                   shape_strides,
                                                   dim,
-                                                  ndim,
+                                                  ndim_int,
                                                   index.numel(),
                                                   grad_size,
                                                   aux_buffer);
@@ -1163,7 +1171,7 @@ void gpu_scatter_mean_input_grad_kernel(DenseTensor self,
                                                   index_data,
                                                   shape_strides,
                                                   dim,
-                                                  ndim,
+                                                  ndim_int,
                                                   index.numel(),
                                                   grad_size,
                                                   aux_buffer);
@@ -1221,6 +1229,8 @@ void gpu_scatter_value_grad_kernel(DenseTensor self,
   auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
 
   int64_t ndim = index_dims.size();
+  PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+  int ndim_int = static_cast<int>(ndim);
 
   DenseTensor shape_stride_dev;
   shape_stride_dev.Resize({3 * ndim});
@@ -1230,7 +1240,7 @@ void gpu_scatter_value_grad_kernel(DenseTensor self,
     shape_stride_host.Resize({3 * ndim});
     dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
     int64_t* host_data = shape_stride_host.data<int64_t>();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim_int; i++) {
       host_data[i] = index_dims[i];
       host_data[i + ndim] = grad.strides()[i];
       host_data[i + (ndim << 1)] = self.strides()[i];
@@ -1255,7 +1265,7 @@ void gpu_scatter_value_grad_kernel(DenseTensor self,
                                                   nullptr,
                                                   shape_strides,
                                                   dim,
-                                                  ndim,
+                                                  ndim_int,
                                                   index.numel(),
                                                   grad.numel(),
                                                   aux_buffer);
@@ -1265,7 +1275,7 @@ void gpu_scatter_value_grad_kernel(DenseTensor self,
                                                   index_data,
                                                   shape_strides,
                                                   dim,
-                                                  ndim,
+                                                  ndim_int,
                                                   index.numel(),
                                                   aux_buffer);
 }
@@ -1336,6 +1346,8 @@ void gpu_scatter_add_mean_value_grad_kernel(DenseTensor self,
   auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
 
   int64_t ndim = index_dims.size();
+  PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+  int ndim_int = static_cast<int>(ndim);
 
   DenseTensor shape_stride_dev;
   shape_stride_dev.Resize({3 * ndim});
@@ -1345,7 +1357,7 @@ void gpu_scatter_add_mean_value_grad_kernel(DenseTensor self,
     shape_stride_host.Resize({3 * ndim});
     dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
     int64_t* host_data = shape_stride_host.data<int64_t>();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim_int; i++) {
       host_data[i] = index_dims[i];
       host_data[i + ndim] = grad.strides()[i];
       host_data[i + (ndim << 1)] = self.strides()[i];
@@ -1377,7 +1389,7 @@ void gpu_scatter_add_mean_value_grad_kernel(DenseTensor self,
                                                     nullptr,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     grad.numel(),
                                                     aux_buffer);
@@ -1387,7 +1399,7 @@ void gpu_scatter_add_mean_value_grad_kernel(DenseTensor self,
                                                     index_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     aux_buffer);
   } else if (reduce == "add") {
@@ -1397,7 +1409,7 @@ void gpu_scatter_add_mean_value_grad_kernel(DenseTensor self,
                                                     index_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel());
   }
 }
@@ -1482,6 +1494,8 @@ void gpu_scatter_mul_min_max_value_grad_kernel(DenseTensor self,
   auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
 
   int64_t ndim = index_dims.size();
+  PADDLE_ENFORCE_LE_INT_MAX(ndim, "gather scatter ndim");
+  int ndim_int = static_cast<int>(ndim);
 
   DenseTensor shape_stride_dev;
   shape_stride_dev.Resize({3 * ndim});
@@ -1491,7 +1505,7 @@ void gpu_scatter_mul_min_max_value_grad_kernel(DenseTensor self,
     shape_stride_host.Resize({3 * ndim});
     dev_ctx.template HostAlloc<int64_t>(&shape_stride_host);
     int64_t* host_data = shape_stride_host.data<int64_t>();
-    for (int64_t i = 0; i < ndim; i++) {
+    for (int i = 0; i < ndim_int; i++) {
       host_data[i] = index_dims[i];
       host_data[i + ndim] = grad.strides()[i];
       host_data[i + (ndim << 1)] = self.strides()[i];
@@ -1516,7 +1530,7 @@ void gpu_scatter_mul_min_max_value_grad_kernel(DenseTensor self,
                                                     out_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel());
   } else if (reduce == "amin" || reduce == "amax") {
     DenseTensor aux_tensor;
@@ -1535,7 +1549,7 @@ void gpu_scatter_mul_min_max_value_grad_kernel(DenseTensor self,
                                                     x_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     grad.numel(),
                                                     aux_buffer,
@@ -1548,7 +1562,7 @@ void gpu_scatter_mul_min_max_value_grad_kernel(DenseTensor self,
                                                     out_data,
                                                     shape_strides,
                                                     dim,
-                                                    ndim,
+                                                    ndim_int,
                                                     index.numel(),
                                                     include_self,
                                                     aux_buffer);

@@ -14,6 +14,7 @@
 
 #include "paddle/phi/kernels/pad3d_grad_kernel.h"
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/backends/gpu/gpu_primitives.h"
 #include "paddle/phi/core/kernel_registry.h"
@@ -359,13 +360,16 @@ void Pad3dGradKernel(const Context& dev_ctx,
   const int64_t num = d_in_dims[0];
 
   auto stream = dev_ctx.stream();
-  int block = PADDLE_CUDA_NUM_THREADS;
+  uint32_t block = PADDLE_CUDA_NUM_THREADS;
   const size_t out_size = d_out->numel();
   const size_t in_size = d_in->numel();
-  uint32_t grid = (out_size + block - 1) / block;
+  size_t grid64 = (out_size + block - 1) / block;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "pad3d grad grid.x");
+  uint32_t grid = static_cast<uint32_t>(grid64);
 
   bool use_int32_index = true;
-  if (out_size > std::numeric_limits<int32_t>::max()) {
+  if (out_size > std::numeric_limits<int32_t>::max() ||
+      in_size > std::numeric_limits<int32_t>::max()) {
     use_int32_index = false;
   } else {
     for (int i = 0; i < d_out_dims.size(); ++i) {
@@ -374,22 +378,37 @@ void Pad3dGradKernel(const Context& dev_ctx,
         break;
       }
     }
+    for (int i = 0; i < d_in_dims.size(); ++i) {
+      if (d_in_dims[i] > std::numeric_limits<int32_t>::max()) {
+        use_int32_index = false;
+        break;
+      }
+    }
   }
   if (use_int32_index) {
+    PADDLE_ENFORCE_LE_INT_MAX(pad_front, "pad_front");
+    PADDLE_ENFORCE_LE_INT_MAX(pad_top, "pad_top");
+    PADDLE_ENFORCE_LE_INT_MAX(pad_left, "pad_left");
+    int out_size_int = static_cast<int>(out_size);
+    int in_size_int = static_cast<int>(in_size);
+    int num_int = static_cast<int>(num);
+    int pad_front_int = static_cast<int>(pad_front);
+    int pad_top_int = static_cast<int>(pad_top);
+    int pad_left_int = static_cast<int>(pad_left);
     if (data_format == "NCDHW") {
-      const int channels = d_in_dims[1];
-      const int in_depth = d_in_dims[2];
-      const int in_height = d_in_dims[3];
-      const int in_width = d_in_dims[4];
-      const int out_depth = d_out_dims[2];
-      const int out_height = d_out_dims[3];
-      const int out_width = d_out_dims[4];
+      const int channels = static_cast<int>(d_in_dims[1]);
+      const int in_depth = static_cast<int>(d_in_dims[2]);
+      const int in_height = static_cast<int>(d_in_dims[3]);
+      const int in_width = static_cast<int>(d_in_dims[4]);
+      const int out_depth = static_cast<int>(d_out_dims[2]);
+      const int out_height = static_cast<int>(d_out_dims[3]);
+      const int out_width = static_cast<int>(d_out_dims[4]);
 
       if (mode == "reflect") {
         Pad3DGradReflectNCDHW<T, int32_t>
-            <<<grid, block, 0, stream>>>(out_size,
+            <<<grid, block, 0, stream>>>(out_size_int,
                                          d_in_data,
-                                         num,
+                                         num_int,
                                          channels,
                                          in_depth,
                                          in_height,
@@ -397,15 +416,15 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          out_depth,
                                          out_height,
                                          out_width,
-                                         pad_front,
-                                         pad_top,
-                                         pad_left,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
                                          d_out_data);
       } else if (mode == "replicate") {
         Pad3DGradReplicateNCDHW<T, int32_t>
-            <<<grid, block, 0, stream>>>(out_size,
+            <<<grid, block, 0, stream>>>(out_size_int,
                                          d_in_data,
-                                         num,
+                                         num_int,
                                          channels,
                                          in_depth,
                                          in_height,
@@ -413,15 +432,15 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          out_depth,
                                          out_height,
                                          out_width,
-                                         pad_front,
-                                         pad_top,
-                                         pad_left,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
                                          d_out_data);
       } else if (mode == "circular") {
         Pad3DGradCircularNCDHW<T, int32_t>
-            <<<grid, block, 0, stream>>>(out_size,
+            <<<grid, block, 0, stream>>>(out_size_int,
                                          d_in_data,
-                                         num,
+                                         num_int,
                                          channels,
                                          in_depth,
                                          in_height,
@@ -429,40 +448,18 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          out_depth,
                                          out_height,
                                          out_width,
-                                         pad_front,
-                                         pad_top,
-                                         pad_left,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
                                          d_out_data);
       } else {
-        grid = (in_size + block - 1) / block;
-        Pad3DGradConstNCDHW<T, int32_t><<<grid, block, 0, stream>>>(in_size,
-                                                                    d_in_data,
-                                                                    num,
-                                                                    channels,
-                                                                    in_depth,
-                                                                    in_height,
-                                                                    in_width,
-                                                                    out_depth,
-                                                                    out_height,
-                                                                    out_width,
-                                                                    pad_front,
-                                                                    pad_top,
-                                                                    pad_left,
-                                                                    d_out_data);
-      }
-    } else {
-      const int channels = d_in_dims[4];
-      const int in_depth = d_in_dims[1];
-      const int in_height = d_in_dims[2];
-      const int in_width = d_in_dims[3];
-      const int out_depth = d_out_dims[1];
-      const int out_height = d_out_dims[2];
-      const int out_width = d_out_dims[3];
-      if (mode == "reflect") {
-        Pad3DGradReflectNDHWC<T, int32_t>
-            <<<grid, block, 0, stream>>>(out_size,
+        grid64 = (in_size + block - 1) / block;
+        PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "pad3d grad const grid.x");
+        grid = static_cast<uint32_t>(grid64);
+        Pad3DGradConstNCDHW<T, int32_t>
+            <<<grid, block, 0, stream>>>(in_size_int,
                                          d_in_data,
-                                         num,
+                                         num_int,
                                          channels,
                                          in_depth,
                                          in_height,
@@ -470,15 +467,40 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          out_depth,
                                          out_height,
                                          out_width,
-                                         pad_front,
-                                         pad_top,
-                                         pad_left,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
+                                         d_out_data);
+      }
+    } else {
+      const int channels = static_cast<int>(d_in_dims[4]);
+      const int in_depth = static_cast<int>(d_in_dims[1]);
+      const int in_height = static_cast<int>(d_in_dims[2]);
+      const int in_width = static_cast<int>(d_in_dims[3]);
+      const int out_depth = static_cast<int>(d_out_dims[1]);
+      const int out_height = static_cast<int>(d_out_dims[2]);
+      const int out_width = static_cast<int>(d_out_dims[3]);
+      if (mode == "reflect") {
+        Pad3DGradReflectNDHWC<T, int32_t>
+            <<<grid, block, 0, stream>>>(out_size_int,
+                                         d_in_data,
+                                         num_int,
+                                         channels,
+                                         in_depth,
+                                         in_height,
+                                         in_width,
+                                         out_depth,
+                                         out_height,
+                                         out_width,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
                                          d_out_data);
       } else if (mode == "replicate") {
         Pad3DGradReplicateNDHWC<T, int32_t>
-            <<<grid, block, 0, stream>>>(out_size,
+            <<<grid, block, 0, stream>>>(out_size_int,
                                          d_in_data,
-                                         num,
+                                         num_int,
                                          channels,
                                          in_depth,
                                          in_height,
@@ -486,15 +508,15 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          out_depth,
                                          out_height,
                                          out_width,
-                                         pad_front,
-                                         pad_top,
-                                         pad_left,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
                                          d_out_data);
       } else if (mode == "circular") {
         Pad3DGradCircularNDHWC<T, int32_t>
-            <<<grid, block, 0, stream>>>(out_size,
+            <<<grid, block, 0, stream>>>(out_size_int,
                                          d_in_data,
-                                         num,
+                                         num_int,
                                          channels,
                                          in_depth,
                                          in_height,
@@ -502,26 +524,29 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          out_depth,
                                          out_height,
                                          out_width,
-                                         pad_front,
-                                         pad_top,
-                                         pad_left,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
                                          d_out_data);
       } else {
-        grid = (in_size + block - 1) / block;
-        Pad3DGradConstNDHWC<T, int32_t><<<grid, block, 0, stream>>>(in_size,
-                                                                    d_in_data,
-                                                                    num,
-                                                                    channels,
-                                                                    in_depth,
-                                                                    in_height,
-                                                                    in_width,
-                                                                    out_depth,
-                                                                    out_height,
-                                                                    out_width,
-                                                                    pad_front,
-                                                                    pad_top,
-                                                                    pad_left,
-                                                                    d_out_data);
+        grid64 = (in_size + block - 1) / block;
+        PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "pad3d grad const grid.x");
+        grid = static_cast<uint32_t>(grid64);
+        Pad3DGradConstNDHWC<T, int32_t>
+            <<<grid, block, 0, stream>>>(in_size_int,
+                                         d_in_data,
+                                         num_int,
+                                         channels,
+                                         in_depth,
+                                         in_height,
+                                         in_width,
+                                         out_depth,
+                                         out_height,
+                                         out_width,
+                                         pad_front_int,
+                                         pad_top_int,
+                                         pad_left_int,
+                                         d_out_data);
       }
     }
 
@@ -584,7 +609,9 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          pad_left,
                                          d_out_data);
       } else {
-        grid = (in_size + block - 1) / block;
+        grid64 = (in_size + block - 1) / block;
+        PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "pad3d grad const grid.x");
+        grid = static_cast<uint32_t>(grid64);
         Pad3DGradConstNCDHW<T, int64_t><<<grid, block, 0, stream>>>(in_size,
                                                                     d_in_data,
                                                                     num,
@@ -657,7 +684,9 @@ void Pad3dGradKernel(const Context& dev_ctx,
                                          pad_left,
                                          d_out_data);
       } else {
-        grid = (in_size + block - 1) / block;
+        grid64 = (in_size + block - 1) / block;
+        PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "pad3d grad const grid.x");
+        grid = static_cast<uint32_t>(grid64);
         Pad3DGradConstNDHWC<T, int64_t><<<grid, block, 0, stream>>>(in_size,
                                                                     d_in_data,
                                                                     num,

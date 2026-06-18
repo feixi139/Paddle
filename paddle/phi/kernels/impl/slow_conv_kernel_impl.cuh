@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "paddle/common/enforce.h"
 #include "paddle/common/flags.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/core/dense_tensor.h"
@@ -126,27 +127,45 @@ void hvol2col(const Context& dev_ctx,
               const std::vector<int64_t>& dilation_size,
               T* data_col) {
   if (dim == 3) {
+    PADDLE_ENFORCE_LE_INT_MAX(input_size[0], "slow conv input depth");
+    PADDLE_ENFORCE_LE_INT_MAX(input_size[1], "slow conv input height");
+    PADDLE_ENFORCE_LE_INT_MAX(input_size[2], "slow conv input width");
+    PADDLE_ENFORCE_LE_INT_MAX(output_size[0], "slow conv output depth");
+    PADDLE_ENFORCE_LE_INT_MAX(output_size[1], "slow conv output height");
+    PADDLE_ENFORCE_LE_INT_MAX(output_size[2], "slow conv output width");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_size[0], "slow conv kernel depth");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_size[1], "slow conv kernel height");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_size[2], "slow conv kernel width");
+    PADDLE_ENFORCE_LE_INT_MAX(pad_size[0], "slow conv pad depth");
+    PADDLE_ENFORCE_LE_INT_MAX(pad_size[1], "slow conv pad height");
+    PADDLE_ENFORCE_LE_INT_MAX(pad_size[2], "slow conv pad width");
+    PADDLE_ENFORCE_LE_INT_MAX(stride_size[0], "slow conv stride depth");
+    PADDLE_ENFORCE_LE_INT_MAX(stride_size[1], "slow conv stride height");
+    PADDLE_ENFORCE_LE_INT_MAX(stride_size[2], "slow conv stride width");
+    PADDLE_ENFORCE_LE_INT_MAX(dilation_size[0], "slow conv dilation depth");
+    PADDLE_ENFORCE_LE_INT_MAX(dilation_size[1], "slow conv dilation height");
+    PADDLE_ENFORCE_LE_INT_MAX(dilation_size[2], "slow conv dilation width");
     funcs::vol2col_slow<T, Context>(dev_ctx,
                                     data_hvol,
                                     channels,
-                                    input_size[0],
-                                    input_size[1],
-                                    input_size[2],
-                                    output_size[0],
-                                    output_size[1],
-                                    output_size[2],
-                                    kernel_size[0],
-                                    kernel_size[1],
-                                    kernel_size[2],
-                                    pad_size[0],
-                                    pad_size[1],
-                                    pad_size[2],
-                                    stride_size[0],
-                                    stride_size[1],
-                                    stride_size[2],
-                                    dilation_size[0],
-                                    dilation_size[1],
-                                    dilation_size[2],
+                                    static_cast<int>(input_size[0]),
+                                    static_cast<int>(input_size[1]),
+                                    static_cast<int>(input_size[2]),
+                                    static_cast<int>(output_size[0]),
+                                    static_cast<int>(output_size[1]),
+                                    static_cast<int>(output_size[2]),
+                                    static_cast<int>(kernel_size[0]),
+                                    static_cast<int>(kernel_size[1]),
+                                    static_cast<int>(kernel_size[2]),
+                                    static_cast<int>(pad_size[0]),
+                                    static_cast<int>(pad_size[1]),
+                                    static_cast<int>(pad_size[2]),
+                                    static_cast<int>(stride_size[0]),
+                                    static_cast<int>(stride_size[1]),
+                                    static_cast<int>(stride_size[2]),
+                                    static_cast<int>(dilation_size[0]),
+                                    static_cast<int>(dilation_size[1]),
+                                    static_cast<int>(dilation_size[2]),
                                     data_col);
   } else if (dim == 2) {
     funcs::im2col_slow<T, Context>(dev_ctx,
@@ -272,6 +291,14 @@ void SlowConvDilatedAllCUDAImpl(const Context& dev_ctx,
   // Buffer
   int64_t col_dim0 = input_channels * kernel_volume;
   int64_t col_dim1 = output_volume;
+  PADDLE_ENFORCE_LE_INT_MAX(input_channels, "slow conv input channels");
+  PADDLE_ENFORCE_LE_INT_MAX(output_channels, "slow conv output channels");
+  PADDLE_ENFORCE_LE_INT_MAX(col_dim0, "slow conv col dim0");
+  PADDLE_ENFORCE_LE_INT_MAX(col_dim1, "slow conv col dim1");
+  const int input_channels_int = static_cast<int>(input_channels);
+  const int output_channels_int = static_cast<int>(output_channels);
+  const int col_dim0_int = static_cast<int>(col_dim0);
+  const int col_dim1_int = static_cast<int>(col_dim1);
 
   DenseTensor columns;
   if (output || grad_weight || grad_input) {
@@ -322,7 +349,7 @@ void SlowConvDilatedAllCUDAImpl(const Context& dev_ctx,
 
       hvol2col<T, Context, Dims>(dev_ctx,
                                  input_ptr_raw,
-                                 input_channels,
+                                 input_channels_int,
                                  input_spatial_size,
                                  output_spatial_size,
                                  kernel_size,
@@ -330,19 +357,19 @@ void SlowConvDilatedAllCUDAImpl(const Context& dev_ctx,
                                  paddings,
                                  dilations,
                                  columns_ptr);
-      blas.GEMM(false,                              // TransA
-                false,                              // TransB
-                static_cast<int>(output_channels),  // M
-                static_cast<int>(col_dim1),         // N
-                static_cast<int>(col_dim0),         // K
-                static_cast<T>(1),                  // alpha
-                weight->data<T>(),                  // A
-                static_cast<int>(col_dim0),         // lda
-                columns_ptr,                        // B
-                static_cast<int>(col_dim1),         // ldb
-                static_cast<T>(1),                  // beta = 1 (Accumulate)
-                output_ptr_raw,                     // C
-                static_cast<int>(col_dim1)          // ldc
+      blas.GEMM(false,                // TransA
+                false,                // TransB
+                output_channels_int,  // M
+                col_dim1_int,         // N
+                col_dim0_int,         // K
+                static_cast<T>(1),    // alpha
+                weight->data<T>(),    // A
+                col_dim0_int,         // lda
+                columns_ptr,          // B
+                col_dim1_int,         // ldb
+                static_cast<T>(1),    // beta = 1 (Accumulate)
+                output_ptr_raw,       // C
+                col_dim1_int          // ldc
       );
     } else {
       grad_output_n = Select<T>(*grad_output, elt);
@@ -354,24 +381,24 @@ void SlowConvDilatedAllCUDAImpl(const Context& dev_ctx,
       T* grad_input_ptr_raw = grad_input_n.data<T>();
       const T* grad_output_ptr_raw = grad_output_n.data<T>();
 
-      blas.GEMM(true,                               // TransA
-                false,                              // TransB
-                static_cast<int>(col_dim0),         // M
-                static_cast<int>(col_dim1),         // N
-                static_cast<int>(output_channels),  // K
-                static_cast<T>(1),                  // alpha
-                weight->data<T>(),                  // A
-                static_cast<int>(col_dim0),         // lda
-                grad_output_ptr_raw,                // B
-                static_cast<int>(col_dim1),         // ldb
-                static_cast<T>(0),                  // beta
-                columns_ptr,                        // C
-                static_cast<int>(col_dim1)          // ldc
+      blas.GEMM(true,                 // TransA
+                false,                // TransB
+                col_dim0_int,         // M
+                col_dim1_int,         // N
+                output_channels_int,  // K
+                static_cast<T>(1),    // alpha
+                weight->data<T>(),    // A
+                col_dim0_int,         // lda
+                grad_output_ptr_raw,  // B
+                col_dim1_int,         // ldb
+                static_cast<T>(0),    // beta
+                columns_ptr,          // C
+                col_dim1_int          // ldc
       );
 
       col2hvol<T, Context, Dims>(dev_ctx,
                                  columns_ptr,
-                                 input_channels,
+                                 input_channels_int,
                                  input_spatial_size,
                                  output_spatial_size,
                                  kernel_size,
@@ -387,7 +414,7 @@ void SlowConvDilatedAllCUDAImpl(const Context& dev_ctx,
 
       hvol2col<T, Context, Dims>(dev_ctx,
                                  input_ptr_raw,
-                                 input_channels,
+                                 input_channels_int,
                                  input_spatial_size,
                                  output_spatial_size,
                                  kernel_size,
@@ -396,19 +423,19 @@ void SlowConvDilatedAllCUDAImpl(const Context& dev_ctx,
                                  dilations,
                                  columns_ptr);
 
-      blas.GEMM(false,                              // TransA
-                true,                               // TransB
-                static_cast<int>(output_channels),  // M
-                static_cast<int>(col_dim0),         // N
-                static_cast<int>(col_dim1),         // K
-                static_cast<T>(1),                  // alpha
-                grad_output_ptr_raw,                // A
-                static_cast<int>(col_dim1),         // lda
-                columns_ptr,                        // B
-                static_cast<int>(col_dim1),         // ldb
-                static_cast<T>(1),                  // beta
-                grad_weight->data<T>(),             // C
-                static_cast<int>(col_dim0)          // ldc
+      blas.GEMM(false,                   // TransA
+                true,                    // TransB
+                output_channels_int,     // M
+                col_dim0_int,            // N
+                col_dim1_int,            // K
+                static_cast<T>(1),       // alpha
+                grad_output_ptr_raw,     // A
+                col_dim1_int,            // lda
+                columns_ptr,             // B
+                col_dim1_int,            // ldb
+                static_cast<T>(1),       // beta
+                grad_weight->data<T>(),  // C
+                col_dim0_int             // ldc
       );
     }
 

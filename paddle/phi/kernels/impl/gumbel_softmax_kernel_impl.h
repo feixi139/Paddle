@@ -17,6 +17,7 @@
 #include <iostream>
 #include <random>
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/kernels/funcs/axis_utils.h"
 #include "paddle/phi/kernels/funcs/eigen/common.h"
@@ -76,9 +77,10 @@ void GumbelSoftmaxKernelHelper(const Context& dev_ctx,
 
   // TODO(large-tensor): SoftmaxFunctor not support int64
   PADDLE_ENFORCE_LE_INT_MAX(axis_dim, "axis_dim");
+  const int axis_dim_int = static_cast<int>(axis_dim);
 
-  const int size_to_axis = funcs::SizeToAxis(axis, x.dims());
-  const int size_from_axis = funcs::SizeFromAxis(axis, x.dims());
+  const int size_to_axis = funcs::SizeToAxis<int>(axis, x.dims());
+  const int size_from_axis = funcs::SizeFromAxis<int>(axis, x.dims());
   DenseTensor x_noise_2d, out_2d(*out);
   x_noise_2d.Resize({size_to_axis, size_from_axis});
   out_2d.Resize({size_to_axis, size_from_axis});
@@ -91,7 +93,8 @@ void GumbelSoftmaxKernelHelper(const Context& dev_ctx,
                                               size_to_axis,
                                               size_from_axis,
                                               temperature);
-  funcs::SoftmaxFunctor<Context, T>()(dev_ctx, axis_dim, &x_noise_2d, &out_2d);
+  funcs::SoftmaxFunctor<Context, T>()(
+      dev_ctx, axis_dim_int, &x_noise_2d, &out_2d);
 
   if (hard) {
     OneHotGenerator<Context, T>::Transform(dev_ctx, x, out, axis);

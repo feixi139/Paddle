@@ -14,6 +14,7 @@
 
 #include "paddle/phi/kernels/gpu/cuda_gemm_kernel.h"
 #include <glog/logging.h>
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/core/enforce.h"
@@ -109,7 +110,11 @@ template <typename InputType,
           int32_t BLOCK_SIZE>
 void cudaCoreGemmKernel(GemmParams const& params) {
   dim3 block(BLOCK_SIZE);
-  dim3 grid(params.m / TILE_M, params.n / TILE_N);
+  int64_t grid_x64 = params.m / TILE_M;
+  int64_t grid_y64 = params.n / TILE_N;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_x64, "cuda gemm grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_y64, "cuda gemm grid.y");
+  dim3 grid(static_cast<uint32_t>(grid_x64), static_cast<uint32_t>(grid_y64));
   int8_gemm<OutputType, TILE_M, TILE_N, BLOCK_SIZE>
       <<<grid, block, 0, params.stream>>>(
           reinterpret_cast<InputType const*>(params.act),
@@ -168,8 +173,11 @@ void CudaGemm(const Context& dev_ctx,
 
   auto out_dims = output->dims();
 
-  const int m = input_dims[0];
-  const int n = weight_dims[0];
+  PADDLE_ENFORCE_LE_INT_MAX(input_dims[0], "cuda gemm m");
+  PADDLE_ENFORCE_LE_INT_MAX(weight_dims[0], "cuda gemm n");
+  PADDLE_ENFORCE_LE_INT_MAX(weight_dims[1], "cuda gemm k");
+  const int m = static_cast<int>(input_dims[0]);
+  const int n = static_cast<int>(weight_dims[0]);
 
   PADDLE_ENFORCE_EQ(
       input_dims[1],
@@ -178,7 +186,7 @@ void CudaGemm(const Context& dev_ctx,
           "The input dims[1] %d should be equal to weight dims[1] %d.",
           input_dims[1],
           weight_dims[1]));
-  const int k = weight_dims[1];
+  const int k = static_cast<int>(weight_dims[1]);
 
   GemmParams params = {
       reinterpret_cast<const void*>(input.data<T>()),

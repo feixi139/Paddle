@@ -17,6 +17,7 @@
 #include "glog/logging.h"
 
 #include "paddle/common/ddim.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/dynload/cusparse.h"
 #ifdef PADDLE_WITH_CUDA
 #include "paddle/phi/backends/gpu/cuda/cuda_graph_with_memory_pool.h"
@@ -88,10 +89,12 @@ inline void CreateCsrDescriptor(const SparseCsrTensor& x,
                                       "greater than or equal to 2."));
   int64_t M = xdim_vec[x_ndims - 2];
   int64_t N = xdim_vec[x_ndims - 1];
-  int batch_size = 1;
+  int64_t batch_size64 = 1;
   for (int i = 0; i < x_ndims - 2; i++) {
-    batch_size *= xdim_vec[i];
+    batch_size64 *= xdim_vec[i];
   }
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size64, "cusparse batch size");
+  int batch_size = static_cast<int>(batch_size64);
   PADDLE_ENFORCE_EQ(x.non_zero_crows().numel(),
                     batch_size * (M + 1),
                     common::errors::PreconditionNotMet(
@@ -144,10 +147,12 @@ inline void CreateCooDescriptor(const SparseCooTensor& x,
 
   int64_t M = xdim_vec[x_ndims - 2];
   int64_t N = xdim_vec[x_ndims - 1];
-  int batch_size = 1;
+  int64_t batch_size64 = 1;
   for (int i = 0; i < x_ndims - 2; i++) {
-    batch_size *= xdim_vec[i];
+    batch_size64 *= xdim_vec[i];
   }
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size64, "cusparse batch size");
+  int batch_size = static_cast<int>(batch_size64);
   int64_t nnz = x.nnz();
 
   const IntT* indices_data = x.non_zero_indices().data<IntT>();
@@ -239,10 +244,13 @@ class CuSparseDnMatDescriptor {
 
     int64_t M = xdim_vec[x_ndims - 2];
     int64_t N = xdim_vec[x_ndims - 1];
-    int batch_size = 1;
-    for (int i = 0; i < x_ndims - 2; i++) {
-      batch_size *= xdim_vec[i];
+    int64_t batch_size_64 = 1;
+    for (size_t i = 0; i < x_ndims - 2; i++) {
+      batch_size_64 *= xdim_vec[i];
     }
+    PADDLE_ENFORCE_LE_INT_MAX(batch_size_64,
+                              "cusparse dense matrix batch size");
+    int batch_size = static_cast<int>(batch_size_64);
 
     const T* x_data = x.data<T>();
     cudaDataType_t gpu_type = GetGpuDataType<T>();
@@ -517,10 +525,12 @@ void SparseBlas<GPUContext>::SPGEMM(bool transa,
   auto a_ndims = a_dim_vec.size();
   const int64_t a_rows = a_dim_vec[a_ndims - 2];
   const int64_t a_cols = a_dim_vec[a_ndims - 1];
-  int a_batch_size = 1;
+  int64_t a_batch_size64 = 1;
   for (int i = 0; i < a_ndims - 2; i++) {
-    a_batch_size *= a_dim_vec[i];
+    a_batch_size64 *= a_dim_vec[i];
   }
+  PADDLE_ENFORCE_LE_INT_MAX(a_batch_size64, "cusparse spgemm batch size");
+  int a_batch_size = static_cast<int>(a_batch_size64);
 
   std::vector<int64_t> b_dim_vec = vectorize(mat_b.dims());
   auto b_ndims = b_dim_vec.size();
@@ -582,8 +592,10 @@ void SparseBlas<GPUContext>::SPGEMM(bool transa,
   std::vector<int32_t> b_batch_nnz_vec(batch_size);
 
   if (batch_size == 1) {
-    a_batch_nnz_vec[0] = mat_a.nnz();
-    b_batch_nnz_vec[0] = mat_b.nnz();
+    PADDLE_ENFORCE_LE_INT_MAX(mat_a.nnz(), "cusparse spgemm a nnz");
+    PADDLE_ENFORCE_LE_INT_MAX(mat_b.nnz(), "cusparse spgemm b nnz");
+    a_batch_nnz_vec[0] = static_cast<int32_t>(mat_a.nnz());
+    b_batch_nnz_vec[0] = static_cast<int32_t>(mat_b.nnz());
   } else {
     phi::Allocator::AllocationPtr tmp_buffer = phi::memory_utils::Alloc(
         dev_ctx_.GetPlace(),
@@ -591,7 +603,10 @@ void SparseBlas<GPUContext>::SPGEMM(bool transa,
         phi::Stream(reinterpret_cast<phi::StreamId>(dev_ctx_.stream())));
     void* tmp_buffer_ptr = tmp_buffer->ptr();
 
-    GetCsrBatchNnz<T><<<1, batch_size, 0, dev_ctx_.stream()>>>(
+    PADDLE_ENFORCE_LE_UINT32_MAX(batch_size, "cusparse spgemm block.x");
+    const uint32_t block = static_cast<uint32_t>(batch_size);
+
+    GetCsrBatchNnz<T><<<1, block, 0, dev_ctx_.stream()>>>(
         a_crows_data, a_rows, static_cast<int32_t*>(tmp_buffer_ptr));
 #ifdef PADDLE_WITH_CUDA
     PADDLE_ENFORCE_EQ(
@@ -610,7 +625,7 @@ void SparseBlas<GPUContext>::SPGEMM(bool transa,
                                        gpuMemcpyDeviceToHost,
                                        dev_ctx_.stream());
 
-    GetCsrBatchNnz<T><<<1, batch_size, 0, dev_ctx_.stream()>>>(
+    GetCsrBatchNnz<T><<<1, block, 0, dev_ctx_.stream()>>>(
         b_crows_data, b_rows, static_cast<int32_t*>(tmp_buffer_ptr));
     phi::backends::gpu::GpuMemcpyAsync(b_batch_nnz_vec.data(),
                                        tmp_buffer_ptr,

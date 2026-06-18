@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #include "paddle/phi/kernels/funcs/math/unpooling.h"
+
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_primitives.h"
 
 namespace phi {
@@ -126,30 +128,48 @@ class Unpool2dMaxFunctor<GPUContext, T> {
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_height = input.dims()[2];
+    int64_t input_height_64 = input.dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(input_height_64,
+                              "KernelUnpool2dMax input_height");
+    int input_height = static_cast<int>(input_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_width = input.dims()[3];
+    int64_t input_width_64 = input.dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(input_width_64, "KernelUnpool2dMax input_width");
+    int input_width = static_cast<int>(input_width_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_channels = output->dims()[1];
+    int64_t output_channels_64 = output->dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(output_channels_64, "KernelUnpool2dMax channels");
+    int output_channels = static_cast<int>(output_channels_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_height = output->dims()[2];
+    int64_t output_height_64 = output->dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(output_height_64,
+                              "KernelUnpool2dMax output_height");
+    int output_height = static_cast<int>(output_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_width = output->dims()[3];
+    int64_t output_width_64 = output->dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(output_width_64,
+                              "KernelUnpool2dMax output_width");
+    int output_width = static_cast<int>(output_width_64);
 
     const T* input_data = input.data<T>();
     const int* indices_data = indices.data<int>();
     T* output_data = context.template Alloc<T>(output);
-    int threads = 1024;
+    uint32_t threads = 1024;
     int64_t max_grid = context.GetCUDAMaxGridDimSize()[0];
-    int grid = std::min((input.numel() + threads - 1) / threads, max_grid);
+    int64_t grid64 =
+        std::min((input.numel() + static_cast<int64_t>(threads) - 1) /
+                     static_cast<int64_t>(threads),
+                 max_grid);
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "KernelUnpool2dMax grid.x");
+    uint32_t grid = static_cast<uint32_t>(grid64);
     KernelUnpool2dMax<T>
         <<<grid, threads, 0, context.stream()>>>(input.numel(),
                                                  input_data,
@@ -180,32 +200,52 @@ class Unpool2dMaxGradFunctor<GPUContext, T> {
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_height = input.dims()[2];
+    int64_t input_height_64 = input.dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(input_height_64,
+                              "KernelUnpool2dMaxGrad input_height");
+    int input_height = static_cast<int>(input_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_width = input.dims()[3];
+    int64_t input_width_64 = input.dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(input_width_64,
+                              "KernelUnpool2dMaxGrad input_width");
+    int input_width = static_cast<int>(input_width_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_channels = output.dims()[1];
+    int64_t output_channels_64 = output.dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(output_channels_64,
+                              "KernelUnpool2dMaxGrad channels");
+    int output_channels = static_cast<int>(output_channels_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_height = output.dims()[2];
+    int64_t output_height_64 = output.dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(output_height_64,
+                              "KernelUnpool2dMaxGrad output_height");
+    int output_height = static_cast<int>(output_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_width = output.dims()[3];
+    int64_t output_width_64 = output.dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(output_width_64,
+                              "KernelUnpool2dMaxGrad output_width");
+    int output_width = static_cast<int>(output_width_64);
 
     const T* input_data = input.data<T>();
     const int* indices_data = indices.data<int>();
     const T* output_data = output.data<T>();
     const T* output_grad_data = output_grad.data<T>();
     T* input_grad_data = context.template Alloc<T>(input_grad);
-    int threads = 1024;
+    uint32_t threads = 1024;
     int64_t max_grid = context.GetCUDAMaxGridDimSize()[0];
-    int grid = std::min((input.numel() + threads - 1) / threads, max_grid);
+    int64_t grid64 =
+        std::min((input.numel() + static_cast<int64_t>(threads) - 1) /
+                     static_cast<int64_t>(threads),
+                 max_grid);
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "KernelUnpool2dMaxGrad grid.x");
+    uint32_t grid = static_cast<uint32_t>(grid64);
     KernelUnpool2dMaxGrad<T>
         <<<grid, threads, 0, context.stream()>>>(input.numel(),
                                                  input_data,
@@ -234,38 +274,61 @@ class Unpool3dMaxFunctor<GPUContext, T> {
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_depth = input.dims()[2];
+    int64_t input_depth_64 = input.dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(input_depth_64, "KernelUnpool3dMax input_depth");
+    int input_depth = static_cast<int>(input_depth_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_height = input.dims()[3];
+    int64_t input_height_64 = input.dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(input_height_64,
+                              "KernelUnpool3dMax input_height");
+    int input_height = static_cast<int>(input_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_width = input.dims()[4];
+    int64_t input_width_64 = input.dims()[4];
+    PADDLE_ENFORCE_LE_INT_MAX(input_width_64, "KernelUnpool3dMax input_width");
+    int input_width = static_cast<int>(input_width_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_channels = output->dims()[1];
+    int64_t output_channels_64 = output->dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(output_channels_64, "KernelUnpool3dMax channels");
+    int output_channels = static_cast<int>(output_channels_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_depth = output->dims()[2];
+    int64_t output_depth_64 = output->dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(output_depth_64,
+                              "KernelUnpool3dMax output_depth");
+    int output_depth = static_cast<int>(output_depth_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_height = output->dims()[3];
+    int64_t output_height_64 = output->dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(output_height_64,
+                              "KernelUnpool3dMax output_height");
+    int output_height = static_cast<int>(output_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_width = output->dims()[4];
+    int64_t output_width_64 = output->dims()[4];
+    PADDLE_ENFORCE_LE_INT_MAX(output_width_64,
+                              "KernelUnpool3dMax output_width");
+    int output_width = static_cast<int>(output_width_64);
 
     const T* input_data = input.data<T>();
     const int* indices_data = indices.data<int>();
     T* output_data = context.template Alloc<T>(output);
-    int threads = 1024;
+    uint32_t threads = 1024;
     int64_t max_grid = context.GetCUDAMaxGridDimSize()[0];
-    int grid = std::min((input.numel() + threads - 1) / threads, max_grid);
+    int64_t grid64 =
+        std::min((input.numel() + static_cast<int64_t>(threads) - 1) /
+                     static_cast<int64_t>(threads),
+                 max_grid);
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "KernelUnpool3dMax grid.x");
+    uint32_t grid = static_cast<uint32_t>(grid64);
     KernelUnpool3dMax<T>
         <<<grid, threads, 0, context.stream()>>>(input.numel(),
                                                  input_data,
@@ -298,40 +361,66 @@ class Unpool3dMaxGradFunctor<GPUContext, T> {
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_depth = input.dims()[2];
+    int64_t input_depth_64 = input.dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(input_depth_64,
+                              "KernelUnpool3dMaxGrad input_depth");
+    int input_depth = static_cast<int>(input_depth_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_height = input.dims()[3];
+    int64_t input_height_64 = input.dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(input_height_64,
+                              "KernelUnpool3dMaxGrad input_height");
+    int input_height = static_cast<int>(input_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t input_width = input.dims()[4];
+    int64_t input_width_64 = input.dims()[4];
+    PADDLE_ENFORCE_LE_INT_MAX(input_width_64,
+                              "KernelUnpool3dMaxGrad input_width");
+    int input_width = static_cast<int>(input_width_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_channels = output.dims()[1];
+    int64_t output_channels_64 = output.dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(output_channels_64,
+                              "KernelUnpool3dMaxGrad channels");
+    int output_channels = static_cast<int>(output_channels_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_depth = output.dims()[2];
+    int64_t output_depth_64 = output.dims()[2];
+    PADDLE_ENFORCE_LE_INT_MAX(output_depth_64,
+                              "KernelUnpool3dMaxGrad output_depth");
+    int output_depth = static_cast<int>(output_depth_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_height = output.dims()[3];
+    int64_t output_height_64 = output.dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(output_height_64,
+                              "KernelUnpool3dMaxGrad output_height");
+    int output_height = static_cast<int>(output_height_64);
 
     // TODO(large-tensor): downstream functors may still use int; guard until
     // upgraded.
-    int64_t output_width = output.dims()[4];
+    int64_t output_width_64 = output.dims()[4];
+    PADDLE_ENFORCE_LE_INT_MAX(output_width_64,
+                              "KernelUnpool3dMaxGrad output_width");
+    int output_width = static_cast<int>(output_width_64);
 
     const T* input_data = input.data<T>();
     const int* indices_data = indices.data<int>();
     const T* output_data = output.data<T>();
     const T* output_grad_data = output_grad.data<T>();
     T* input_grad_data = context.template Alloc<T>(input_grad);
-    int threads = 1024;
+    uint32_t threads = 1024;
     int64_t max_grid = context.GetCUDAMaxGridDimSize()[0];
-    int grid = std::min((input.numel() + threads - 1) / threads, max_grid);
+    int64_t grid64 =
+        std::min((input.numel() + static_cast<int64_t>(threads) - 1) /
+                     static_cast<int64_t>(threads),
+                 max_grid);
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "KernelUnpool3dMaxGrad grid.x");
+    uint32_t grid = static_cast<uint32_t>(grid64);
     KernelUnpool3dMaxGrad<T>
         <<<grid, threads, 0, context.stream()>>>(input.numel(),
                                                  input_data,

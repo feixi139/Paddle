@@ -320,11 +320,11 @@ struct ReduceConfig {
 
     int dim0_pow2 =
         (dim0 < max_num_threads)
-            ? static_cast<int>(phi::backends::gpu::GetLastPow2(dim0))
+            ? phi::backends::gpu::GetLastPow2(static_cast<int>(dim0))
             : max_num_threads;
     int dim1_pow2 =
         (dim1 < max_num_threads)
-            ? static_cast<int>(phi::backends::gpu::GetLastPow2(dim1))
+            ? phi::backends::gpu::GetLastPow2(static_cast<int>(dim1))
             : max_num_threads;
     block_width = std::min(dim0_pow2, WARP_SIZE);
     block_height =
@@ -485,7 +485,11 @@ ReduceConfig SetReduceConfig(const DenseTensorIterator& iter) {
   int64_t inputs_per_output = iter.numel() / num_outputs;
   int input_index = iter.ntensors() - 1;
 
-  auto config = ReduceConfig(sizeof(MPType), num_outputs, inputs_per_output);
+  PADDLE_ENFORCE_LE_INT_MAX(num_outputs, "reduce num outputs");
+  PADDLE_ENFORCE_LE_INT_MAX(inputs_per_output, "reduce inputs per output");
+  auto config = ReduceConfig(sizeof(MPType),
+                             static_cast<int>(num_outputs),
+                             static_cast<int>(inputs_per_output));
 
   int64_t dim0;
   int64_t dim1;
@@ -669,10 +673,10 @@ struct ReduceExecutor {
                  void* acc_buf,
                  void* cta_buf,
                  int* semaphores,
-                 int base_idx,
+                 int64_t base_idx,
                  bool accumulate,
                  bool final_output,
-                 int64_t noutputs)
+                 int noutputs)
       : reducer(reducer),
         config(config),
         ident(ident),

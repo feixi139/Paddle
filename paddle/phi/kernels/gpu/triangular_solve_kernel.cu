@@ -15,9 +15,11 @@
 #include "paddle/phi/kernels/triangular_solve_kernel.h"
 
 #include "paddle/common/ddim.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/cuda/cuda_graph_with_memory_pool.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/common/memory_utils.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/empty_kernel.h"
 #include "paddle/phi/kernels/expand_kernel.h"
@@ -62,15 +64,21 @@ void TriangularSolveKernel(const Context& dev_ctx,
   CBLAS_TRANSPOSE transA = transpose ? CblasTrans : CblasNoTrans;
   CBLAS_DIAG diag = unitriangular ? CblasUnit : CblasNonUnit;
 
-  int M = static_cast<int>(y_bst_dims_vec[y_bst_ndim - 2]);
-  int N = static_cast<int>(y_bst_dims_vec[y_bst_ndim - 1]);
+  int64_t M64 = y_bst_dims_vec[y_bst_ndim - 2];
+  int64_t N64 = y_bst_dims_vec[y_bst_ndim - 1];
+  PADDLE_ENFORCE_LE_INT_MAX(M64, "triangular solve M");
+  PADDLE_ENFORCE_LE_INT_MAX(N64, "triangular solve N");
+  int M = static_cast<int>(M64);
+  int N = static_cast<int>(N64);
   int lda = std::max(1, M);
   int ldb = std::max(1, N);
 
-  int64_t batch_size = 1;
+  int64_t batch_size64 = 1;
   for (int64_t i = 0; i < x_bst_ndim - 2; i++) {
-    batch_size *= x_bst_dims_vec[i];
+    batch_size64 *= x_bst_dims_vec[i];
   }
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size64, "triangular solve batch size");
+  int batch_size = static_cast<int>(batch_size64);
 
   auto blas = funcs::GetBlas<GPUContext, T>(dev_ctx);
   if (batch_size <= 8 && M >= 64) {

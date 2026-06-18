@@ -14,6 +14,7 @@ limitations under the License. */
 
 #include "paddle/phi/kernels/multinomial_kernel.h"
 #include "paddle/common/ddim.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/common/data_type.h"
 #include "paddle/phi/common/scalar.h"
@@ -89,7 +90,7 @@ __global__ void sampleMultinomialWithReplacement(
     const int64_t num_samples,
     int64_t* out_data,
     const int64_t num_distributions,
-    const int64_t num_categories,
+    const int num_categories,
     T* cumulative_probs_data,
     T* norm_probs_data,
     uint64_t seed,
@@ -146,6 +147,8 @@ void MultinomialKernel(const Context& dev_ctx,
   int64_t dim_size = in_dims.size();
   const int64_t num_categories = in_dims[dim_size - 1];
   const int64_t num_distributions = dim_size > 1 ? in_dims[dim_size - 2] : 1;
+  PADDLE_ENFORCE_LE_INT_MAX(num_categories, "multinomial num_categories");
+  const int num_categories_int = static_cast<int>(num_categories);
   // If replacement is False, it's not a replaceable sample. Every category
   // can be used only once.
   if (!replacement) {
@@ -205,9 +208,13 @@ void MultinomialKernel(const Context& dev_ctx,
   norm_probs_tensor.Resize({num_distributions, num_categories});
   auto* norm_probs_data = dev_ctx.template Alloc<MT>(&norm_probs_tensor);
   // number of threads in a block is min(num_categories, 512)
-  int block_size = num_categories < 512 ? num_categories : 512;
-  dim3 block_norm(block_size);
-  dim3 grid_norm((num_distributions * num_categories - 1) / block_norm.x + 1);
+  int block_size = num_categories_int < 512 ? num_categories_int : 512;
+  PADDLE_ENFORCE_LE_UINT32_MAX(block_size, "multinomial normalize block.x");
+  dim3 block_norm(static_cast<uint32_t>(block_size));
+  int64_t grid_norm_x64 =
+      (num_distributions * num_categories - 1) / block_norm.x + 1;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_norm_x64, "multinomial normalize grid.x");
+  dim3 grid_norm(static_cast<uint32_t>(grid_norm_x64));
 
   NormalizeProbability<T, MT>
       <<<grid_norm, block_norm, 0, dev_ctx.stream()>>>(norm_probs_data,
@@ -237,12 +244,15 @@ void MultinomialKernel(const Context& dev_ctx,
   dim3 block(128);
   int64_t device_id = dev_ctx.GetPlace().GetDeviceId();
   const auto& prop = backends::gpu::GetDeviceProperties(device_id);
-  int grid_y = std::min<int64_t>(num_distributions, prop.maxGridSize[1]);
-  dim3 grid((int_num_samples - 1) / block.x + 1, grid_y);
+  int64_t grid_y64 = std::min<int64_t>(num_distributions, prop.maxGridSize[1]);
+  int64_t grid_x64 = (int_num_samples - 1) / block.x + 1;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_x64, "multinomial sample grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_y64, "multinomial sample grid.y");
+  dim3 grid(static_cast<uint32_t>(grid_x64), static_cast<uint32_t>(grid_y64));
 
   auto gen_cuda = dev_ctx.GetGenerator();
   size_t curand4_loop_times =
-      (num_distributions + 4 * grid_y - 1) / (4 * grid_y);
+      (num_distributions + 4 * grid_y64 - 1) / (4 * grid_y64);
   // 'increment' should be multiple of 4
   uint64_t increment = curand4_loop_times * 4;
   auto seed_offset = gen_cuda->IncrementOffset(increment);
@@ -251,7 +261,7 @@ void MultinomialKernel(const Context& dev_ctx,
       <<<grid, block, 0, dev_ctx.stream()>>>(int_num_samples,
                                              out_data,
                                              num_distributions,
-                                             num_categories,
+                                             num_categories_int,
                                              cumulative_probs_data,
                                              norm_probs_data,
                                              seed_offset.first,

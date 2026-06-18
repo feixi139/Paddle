@@ -63,11 +63,11 @@ void FusedBiasDropoutResidualLnKernel(const Context& dev_ctx,
   auto* y_data = dev_ctx.template Alloc<T>(y, y->numel() * sizeof(T));
   if (y->numel() == 0) return;
   const auto input_x_dims = x.dims();
-  int bsz_seq = 1;
+  int64_t bsz_seq = 1;
   for (int i = 0; i < input_x_dims.size() - 1; i++) {
     bsz_seq *= input_x_dims[i];
   }
-  int dim_embed = input_x_dims[input_x_dims.size() - 1];
+  int64_t dim_embed = input_x_dims[input_x_dims.size() - 1];
   fusion::DropoutParam dropout_param(
       dropout_fix_seed,
       0,

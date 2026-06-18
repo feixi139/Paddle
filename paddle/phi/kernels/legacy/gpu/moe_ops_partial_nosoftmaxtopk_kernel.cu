@@ -19,6 +19,7 @@
  *     with minor changes. */
 
 #include "paddle/phi/kernels/legacy/gpu/moe_ops_partial_nosoftmaxtopk_kernel.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/core/kernel_registry.h"
@@ -60,10 +61,24 @@ size_t getWorkspaceSize(const int num_rows,
                         bool use_pad,
                         phi::CubKeyValueSorter &sorter) {  // NOLINT
   // const int buf_size = AlignTo16(k * num_rows * hidden_size);
-  const int interbuf_size = AlignTo16(k * num_rows * inter_size);
-  const int padded_experts = AlignTo16(num_experts);
-  const int num_moe_inputs = AlignTo16(k * num_rows);
-  const int num_dispatched_size = AlignTo16(num_experts * capacity);
+  const int64_t num_moe_inputs_raw_64 = static_cast<int64_t>(k) * num_rows;
+  const int64_t num_dispatched_size_raw_64 =
+      static_cast<int64_t>(num_experts) * capacity;
+  const int64_t interbuf_size_64 =
+      AlignTo16(num_moe_inputs_raw_64 * inter_size);
+  const int64_t padded_experts_64 = AlignTo16(num_experts);
+  const int64_t num_moe_inputs_64 = AlignTo16(num_moe_inputs_raw_64);
+  const int64_t num_dispatched_size_64 = AlignTo16(num_dispatched_size_raw_64);
+  PADDLE_ENFORCE_LE_INT_MAX(num_moe_inputs_raw_64, "moe num_moe_inputs raw");
+  PADDLE_ENFORCE_LE_INT_MAX(interbuf_size_64, "moe interbuf_size");
+  PADDLE_ENFORCE_LE_INT_MAX(padded_experts_64, "moe padded_experts");
+  PADDLE_ENFORCE_LE_INT_MAX(num_moe_inputs_64, "moe num_moe_inputs");
+  PADDLE_ENFORCE_LE_INT_MAX(num_dispatched_size_64, "moe num_dispatched_size");
+  const int num_moe_inputs_raw = static_cast<int>(num_moe_inputs_raw_64);
+  const int interbuf_size = static_cast<int>(interbuf_size_64);
+  const int padded_experts = static_cast<int>(padded_experts_64);
+  const int num_moe_inputs = static_cast<int>(num_moe_inputs_64);
+  const int num_dispatched_size = static_cast<int>(num_dispatched_size_64);
   int num_softmax_outs = 0;
 
   // softmax output, permuted_rows and permuted_experts have moved to outside of
@@ -78,16 +93,25 @@ size_t getWorkspaceSize(const int num_rows,
       sizeof(int64_t);  // Hold total_rows_before_expert_  // expert_cnt
   // total_ws_bytes += buf_size * sizeof(KeyT);                // permuted_data
   total_ws_bytes += num_softmax_outs * sizeof(KeyT);
-  const int bytes_for_fc1_result = interbuf_size * sizeof(KeyT);
-  const int sorter_ws_size_bytes =
-      std::max(AlignTo16(sorter.getWorkspaceSize(k * num_rows)),
+  const int64_t bytes_for_fc1_result_64 =
+      static_cast<int64_t>(interbuf_size) * sizeof(KeyT);
+  const int64_t sorter_ws_size_bytes_64 =
+      std::max(AlignTo16(sorter.getWorkspaceSize(num_moe_inputs_raw)),
                AlignTo16(sorter.getWorkspaceSize(capacity)));
+  PADDLE_ENFORCE_LE_INT_MAX(bytes_for_fc1_result_64,
+                            "moe bytes_for_fc1_result");
+  PADDLE_ENFORCE_LE_INT_MAX(sorter_ws_size_bytes_64,
+                            "moe sorter_ws_size_bytes");
+  const int bytes_for_fc1_result = static_cast<int>(bytes_for_fc1_result_64);
+  const int sorter_ws_size_bytes = static_cast<int>(sorter_ws_size_bytes_64);
   // sorter.update_num_experts(num_experts+1); // +1 for filter out of capacity
   // // 用所有 bit 做排序,会降低些许性能,但是防止越界
   int bytes_for_intermediate_and_sorting = bytes_for_fc1_result;
   if (sorter_ws_size_bytes > bytes_for_fc1_result) {
-    int remaining_bytes =
+    const int64_t remaining_bytes_64 =
         AlignTo16(sorter_ws_size_bytes - bytes_for_fc1_result);
+    PADDLE_ENFORCE_LE_INT_MAX(remaining_bytes_64, "moe remaining_bytes");
+    int remaining_bytes = static_cast<int>(remaining_bytes_64);
     bytes_for_intermediate_and_sorting += remaining_bytes;
   }
   // std::cout<<"num_softmax_outs --"<< num_softmax_outs << std::endl;
@@ -138,12 +162,41 @@ void apply_moe_dispatch_fwd(
   // expert_for_source_row_tensor.data<int>(); paddle::Tensor active_cnt_tensor
   // = paddle::empty({1}, DataType::INT32, place);
 
-  int64_t bytes = getWorkspaceSize<T>(num_rows,
-                                      hidden_size,  // hidden-size=0
-                                      0,            // inter-size=0
-                                      num_experts,
-                                      capacity,
-                                      k,
+  PADDLE_ENFORCE_LE_INT_MAX(k, "moe k");
+  PADDLE_ENFORCE_LE_INT_MAX(num_rows, "moe num_rows");
+  PADDLE_ENFORCE_LE_INT_MAX(num_experts, "moe num_experts");
+  PADDLE_ENFORCE_LE_INT_MAX(capacity, "moe capacity");
+  PADDLE_ENFORCE_LE_INT_MAX(hidden_size, "moe hidden_size");
+  PADDLE_ENFORCE_LE_INT_MAX(expert_start_index, "moe expert_start_index");
+  PADDLE_ENFORCE_LE_INT_MAX(expert_end_index, "moe expert_end_index");
+  const int64_t num_rows_k_64 = num_rows * k;
+  const int64_t num_experts_capacity_64 = num_experts * capacity;
+  const int64_t expert_range_capacity_64 =
+      (expert_end_index - expert_start_index) * capacity;
+  PADDLE_ENFORCE_LE_INT_MAX(num_rows_k_64, "moe num_rows * k");
+  PADDLE_ENFORCE_LE_INT_MAX(num_experts_capacity_64,
+                            "moe num_experts * capacity");
+  PADDLE_ENFORCE_LE_INT_MAX(expert_range_capacity_64,
+                            "moe expert range capacity");
+  const int k_int = static_cast<int>(k);
+  const int num_rows_int = static_cast<int>(num_rows);
+  const int num_experts_int = static_cast<int>(num_experts);
+  const int capacity_int = static_cast<int>(capacity);
+  const int hidden_size_int = static_cast<int>(hidden_size);
+  const int expert_start_index_int = static_cast<int>(expert_start_index);
+  const int expert_end_index_int = static_cast<int>(expert_end_index);
+  const int num_rows_k_int = static_cast<int>(num_rows_k_64);
+  const int num_experts_capacity_int =
+      static_cast<int>(num_experts_capacity_64);
+  const int expert_range_capacity_int =
+      static_cast<int>(expert_range_capacity_64);
+
+  int64_t bytes = getWorkspaceSize<T>(num_rows_int,
+                                      hidden_size_int,  // hidden-size=0
+                                      0,                // inter-size=0
+                                      num_experts_int,
+                                      capacity_int,
+                                      k_int,
                                       use_pad,
                                       sorter);
 
@@ -170,16 +223,28 @@ void apply_moe_dispatch_fwd(
   // int64_t* total_rows_before_expert_;
   T *fc1_result_;
 
-  const int sorter_ws_size_bytes =
-      AlignTo16(sorter.getWorkspaceSize(k * num_rows));
-  const int sorter_ws_size_bytes_seqsort =
-      AlignTo16(sorter.getWorkspaceSize(capacity));
+  const int64_t sorter_ws_size_bytes_64 =
+      AlignTo16(sorter.getWorkspaceSize(num_rows_k_int));
+  const int64_t sorter_ws_size_bytes_seqsort_64 =
+      AlignTo16(sorter.getWorkspaceSize(capacity_int));
 
-  const int buf_size = AlignTo16(k * num_rows * hidden_size);
   // const int interbuf_size  = AlignTo16(k * num_rows * 0);
-  const int padded_experts = AlignTo16(num_experts);
-  const int num_moe_inputs = AlignTo16(k * num_rows);
-  const int num_dispatched_size = AlignTo16(num_experts * capacity);
+  const int64_t padded_experts_64 = AlignTo16(num_experts);
+  const int64_t num_moe_inputs_64 = AlignTo16(num_rows_k_64);
+  const int64_t num_dispatched_size_64 = AlignTo16(num_experts_capacity_64);
+  PADDLE_ENFORCE_LE_INT_MAX(sorter_ws_size_bytes_64,
+                            "moe sorter_ws_size_bytes");
+  PADDLE_ENFORCE_LE_INT_MAX(sorter_ws_size_bytes_seqsort_64,
+                            "moe sorter_ws_size_bytes_seqsort");
+  PADDLE_ENFORCE_LE_INT_MAX(padded_experts_64, "moe padded_experts");
+  PADDLE_ENFORCE_LE_INT_MAX(num_moe_inputs_64, "moe num_moe_inputs");
+  PADDLE_ENFORCE_LE_INT_MAX(num_dispatched_size_64, "moe num_dispatched_size");
+  const int sorter_ws_size_bytes = static_cast<int>(sorter_ws_size_bytes_64);
+  const int sorter_ws_size_bytes_seqsort =
+      static_cast<int>(sorter_ws_size_bytes_seqsort_64);
+  const int padded_experts = static_cast<int>(padded_experts_64);
+  const int num_moe_inputs = static_cast<int>(num_moe_inputs_64);
+  const int num_dispatched_size = static_cast<int>(num_dispatched_size_64);
 
   // 4:ints [k*row]
   source_rows_ = reinterpret_cast<int *>(ws_ptr);
@@ -210,13 +275,13 @@ void apply_moe_dispatch_fwd(
 
   thrust::transform(thrust::cuda::par.on(stream),
                     thrust::device_pointer_cast(source_rows_),
-                    thrust::device_pointer_cast(source_rows_) + num_rows * k,
+                    thrust::device_pointer_cast(source_rows_) + num_rows_k_int,
                     thrust::counting_iterator<int>(0),
                     thrust::device_pointer_cast(source_rows_),
-                    [num_rows, k] __device__(int i, int cnt) {
-                      int k_idx = cnt % k;
-                      int block_row = cnt / k;
-                      return k_idx * num_rows + block_row;
+                    [num_rows_int, k_int] __device__(int i, int cnt) {
+                      int k_idx = cnt % k_int;
+                      int block_row = cnt / k_int;
+                      return k_idx * num_rows_int + block_row;
                     });
 
 #ifdef DEBUG_MOE_OP
@@ -236,20 +301,20 @@ void apply_moe_dispatch_fwd(
   compute_global_expert_offset(expert_id,
                                expert_id_,  // buffer
                                expert_offset_global,
-                               num_rows * k,
-                               num_experts,
-                               capacity,
+                               num_rows_k_int,
+                               num_experts_int,
+                               capacity_int,
                                stream,
                                allocator);
 
   // modify expert-id according to k
   modify_and_mask_expert_id_launcher(expert_id,
                                      expert_id_,
-                                     k,
-                                     num_rows,
-                                     static_cast<int>(num_experts),
-                                     static_cast<int>(expert_start_index),
-                                     static_cast<int>(expert_end_index),
+                                     k_int,
+                                     num_rows_int,
+                                     num_experts_int,
+                                     expert_start_index_int,
+                                     expert_end_index_int,
                                      stream);
 
 #ifdef DEBUG_MOE_OP
@@ -263,12 +328,16 @@ void apply_moe_dispatch_fwd(
       permuted_experts_,  // key out // [num_row, k]: expert-id
       source_rows_,       // value in
       permuted_rows_,  // value out //[num_row, k]: id在原 activation 中的位置
-      k * num_rows,  // num_rows
+      num_rows_k_int,  // num_rows
       false,
       stream);
 
-  unmodify_expert_id_launcher(
-      permuted_experts_, permuted_experts_, k, num_rows, num_experts, stream);
+  unmodify_expert_id_launcher(permuted_experts_,
+                              permuted_experts_,
+                              k_int,
+                              num_rows_int,
+                              num_experts_int,
+                              stream);
 
 #ifdef DEBUG_MOE_OP
   print_to_screen1<int>(
@@ -280,9 +349,9 @@ void apply_moe_dispatch_fwd(
   compute_local_expert_offset(permuted_experts_,
                               expert_offset_,
                               expert_nums_local,
-                              num_rows * k,
-                              num_experts,
-                              capacity,
+                              num_rows_k_int,
+                              num_experts_int,
+                              capacity_int,
                               stream,
                               allocator);
 
@@ -292,6 +361,8 @@ void apply_moe_dispatch_fwd(
                             cudaMemcpyDeviceToHost,
                             stream));
   CUDACHECK(cudaStreamSynchronize(stream));
+  PADDLE_ENFORCE_LE_INT_MAX(expert_offset_host.back(), "moe num_active");
+  int num_active_int = static_cast<int>(expert_offset_host.back());
 
 #ifdef DEBUG_MOE_OP
   std::cerr << "[DEBUG] num_active v2: " << expert_offset_host.back()
@@ -313,11 +384,11 @@ void apply_moe_dispatch_fwd(
   if (!use_pad) {  // 2sort
     cal_expert_size_and_filter_launcher(permuted_experts_,
                                         expert_offset_,
-                                        expert_offset_host.back(),
-                                        num_experts,
-                                        capacity,
-                                        expert_start_index,
-                                        expert_end_index,
+                                        num_active_int,
+                                        num_experts_int,
+                                        capacity_int,
+                                        expert_start_index_int,
+                                        expert_end_index_int,
                                         reverse_token_drop,
                                         stream);
     // 2sort
@@ -328,16 +399,16 @@ void apply_moe_dispatch_fwd(
         permuted_experts_,  // key out // [num_row, k]: expert-id
         permuted_rows_,     // value in
         permuted_rows_,  // value out //[num_row, k]: id在原 activation 中的位置
-        k * num_rows,  // num_rows
+        num_rows_k_int,  // num_rows
         false,
         stream);
 
     compute_local_expert_offset(permuted_experts_,
                                 expert_offset_,
                                 expert_nums_local,
-                                num_rows * k,
-                                num_experts,
-                                capacity,
+                                num_rows_k_int,
+                                num_experts_int,
+                                capacity_int,
                                 stream,
                                 allocator);
 
@@ -347,6 +418,8 @@ void apply_moe_dispatch_fwd(
                               cudaMemcpyDeviceToHost,
                               stream));
     CUDACHECK(cudaStreamSynchronize(stream));
+    PADDLE_ENFORCE_LE_INT_MAX(expert_offset_host.back(), "moe num_active");
+    num_active_int = static_cast<int>(expert_offset_host.back());
 
 #ifdef DEBUG_MOE_OP
     std::cerr << "[DEBUG](after 2sort) num_active v2: "
@@ -365,8 +438,8 @@ void apply_moe_dispatch_fwd(
   thrust::fill(
       thrust::cuda::par.on(stream),
       thrust::device_ptr<int>(scatter_index_rev),
-      thrust::device_ptr<int>(scatter_index_rev) + num_experts * capacity,
-      num_rows);
+      thrust::device_ptr<int>(scatter_index_rev) + num_experts_capacity_int,
+      num_rows_int);
   build_seqsort_kv_pairs_kernel_launcher(
       scatter_index_rev,         // padded_to_unpermuted_input
       source_rows_for_seqsort_,  // seqsort-value
@@ -375,11 +448,11 @@ void apply_moe_dispatch_fwd(
       permuted_experts_,
       expert_offset_,
       combine_weights,  // 对截断位置置0
-      static_cast<int>(num_rows),
-      static_cast<int>(k),
-      expert_offset_host.back(),  // num_active
-      capacity,
-      expert_start_index,  // expert start index
+      num_rows_int,
+      k_int,
+      num_active_int,  // num_active
+      capacity_int,
+      expert_start_index_int,  // expert start index
       use_pad,
       stream);
 
@@ -400,19 +473,21 @@ void apply_moe_dispatch_fwd(
           "scatter_index_rev after build_seqsort_kv_pairs_kernel_launcher"));
 #endif
   if (use_pad) {
-    for (auto iexpert = 0; iexpert != expert_end_index - expert_start_index;
+    for (auto iexpert = 0;
+         iexpert != expert_end_index_int - expert_start_index_int;
          ++iexpert) {
-      sorter.run(fc1_result_,
-                 sorter_ws_size_bytes_seqsort,
-                 scatter_index_rev + (iexpert * capacity),         // key in
-                 scatter_index_rev + (iexpert * capacity),         // key out
-                 source_rows_for_seqsort_ + (iexpert * capacity),  // value in
-                 source_rows_for_seqsort_ +
-                     (iexpert * capacity),  // value out //[num_row, k]: id在原
-                                            // activation 中的位置
-                 capacity,  // num_rows
-                 false,
-                 stream);
+      sorter.run(
+          fc1_result_,
+          sorter_ws_size_bytes_seqsort,
+          scatter_index_rev + (iexpert * capacity_int),         // key in
+          scatter_index_rev + (iexpert * capacity_int),         // key out
+          source_rows_for_seqsort_ + (iexpert * capacity_int),  // value in
+          source_rows_for_seqsort_ +
+              (iexpert * capacity_int),  // value out //[num_row, k]: id在原
+                                         // activation 中的位置
+          capacity_int,                  // num_rows
+          false,
+          stream);
     }
   } else {
     auto sort_iter = thrust::make_zip_iterator(thrust::make_tuple(
@@ -446,11 +521,10 @@ void apply_moe_dispatch_fwd(
       scatter_index_rev,         // padded_out_to_unpermuted_input
       source_rows_for_seqsort_,  // padded_out_to_expanded_input
       scatter_index,             // out
-      use_pad ? (expert_end_index - expert_start_index) * capacity
-              : expert_offset_host.back(),  // num_active
-      num_rows,
-      k,
-      hidden_size,
+      use_pad ? expert_range_capacity_int : num_active_int,  // num_active
+      num_rows_int,
+      k_int,
+      hidden_size_int,
       stream);
   // cudaDeviceSynchronize(); //debug
   // turn expert_offset_ptr into experts_num

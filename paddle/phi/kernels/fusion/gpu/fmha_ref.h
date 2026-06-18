@@ -16,6 +16,7 @@
 
 #include "glog/logging.h"
 
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/tensor_utils.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/broadcast_function.h"
@@ -222,14 +223,21 @@ class FMHARef {
     CBLAS_TRANSPOSE transA = CblasNoTrans;
     CBLAS_TRANSPOSE transB = CblasTrans;
     auto blas = funcs::GetBlas<GPUContext, T>(dev_ctx_);
-    int gemm_batch_size = batch_size_ * num_head_;
-    int gemm_m = seq_len_;
-    int gemm_n = out_seq_len;
-    int gemm_k = head_dim_;
+    int64_t gemm_batch_size = batch_size_ * num_head_;
+    PADDLE_ENFORCE_LE_INT_MAX(gemm_batch_size, "fmha ref gemm batch size");
+    PADDLE_ENFORCE_LE_INT_MAX(batch_size_, "fmha ref batch size");
+    PADDLE_ENFORCE_LE_INT_MAX(num_head_, "fmha ref num head");
+    PADDLE_ENFORCE_LE_INT_MAX(seq_len_, "fmha ref seq len");
+    PADDLE_ENFORCE_LE_INT_MAX(out_seq_len, "fmha ref out seq len");
+    PADDLE_ENFORCE_LE_INT_MAX(head_dim_, "fmha ref head dim");
+    int gemm_batch_count = static_cast<int>(gemm_batch_size);
+    int gemm_m = static_cast<int>(seq_len_);
+    int gemm_n = static_cast<int>(out_seq_len);
+    int gemm_k = static_cast<int>(head_dim_);
     T alpha = static_cast<T>(1.0);
     T beta = static_cast<T>(0.0);
-    int64_t stride_a = gemm_m * gemm_k;
-    int64_t stride_b = gemm_k * gemm_n;
+    int64_t stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    int64_t stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
     blas.BatchedGEMM(transA,
                      transB,
                      gemm_m,
@@ -240,19 +248,20 @@ class FMHARef {
                      k_ptr,
                      beta,
                      qk_out_data,
-                     gemm_batch_size,
+                     gemm_batch_count,
                      stride_a,
                      stride_b);
     int softmax_axis = -1;
     if (src_mask_tensor != nullptr) {
       if (src_mask_out_tensor == nullptr && seq_len_ == out_seq_len) {
-        phi::fusion::LaunchFusedSoftmaxMaskKernel<T>(qk_out_data,
-                                                     src_mask_tensor->data<T>(),
-                                                     softmax_out_data,
-                                                     batch_size_,
-                                                     num_head_,
-                                                     seq_len_,
-                                                     dev_ctx_.stream());
+        phi::fusion::LaunchFusedSoftmaxMaskKernel<T>(
+            qk_out_data,
+            src_mask_tensor->data<T>(),
+            softmax_out_data,
+            static_cast<int>(batch_size_),
+            static_cast<int>(num_head_),
+            static_cast<int>(seq_len_),
+            dev_ctx_.stream());
       } else {
         std::vector<const DenseTensor*> ins;
         std::vector<DenseTensor*> outs;
@@ -272,12 +281,12 @@ class FMHARef {
     }
 
     transB = CblasNoTrans;
-    gemm_m = seq_len_;
-    gemm_n = head_dim_;
-    gemm_k = out_seq_len;
+    gemm_m = static_cast<int>(seq_len_);
+    gemm_n = static_cast<int>(head_dim_);
+    gemm_k = static_cast<int>(out_seq_len);
     alpha = static_cast<T>(1.0);
-    stride_a = gemm_m * gemm_k;
-    stride_b = gemm_k * gemm_n;
+    stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
 
     if (dropout_param_.dropout_prob_) {
       funcs::DropoutFwGPUKernelDriver<T>(
@@ -303,7 +312,7 @@ class FMHARef {
                        v_ptr,
                        beta,
                        qktv_out_data,
-                       gemm_batch_size,
+                       gemm_batch_count,
                        stride_a,
                        stride_b);
     } else {
@@ -319,7 +328,7 @@ class FMHARef {
                        v_ptr,
                        beta,
                        qktv_out_data,
-                       gemm_batch_size,
+                       gemm_batch_count,
                        stride_a,
                        stride_b);
     }
@@ -394,14 +403,26 @@ class FMHARef {
     CBLAS_TRANSPOSE transA = CblasNoTrans;
     CBLAS_TRANSPOSE transB = CblasTrans;
     auto blas = funcs::GetBlas<GPUContext, T>(dev_ctx_);
-    int gemm_batch_size = batch_size_ * num_head_;
-    int gemm_m = seq_len_;
-    int gemm_n = out_seq_len;
-    int gemm_k = head_dim_;
+    int64_t gemm_batch_size_64 = batch_size_ * num_head_;
+    PADDLE_ENFORCE_LE_INT_MAX(gemm_batch_size_64,
+                              "fmha ref no transpose gemm batch size");
+    PADDLE_ENFORCE_LE_INT_MAX(batch_size_, "fmha ref no transpose batch size");
+    PADDLE_ENFORCE_LE_INT_MAX(num_head_, "fmha ref no transpose num head");
+    PADDLE_ENFORCE_LE_INT_MAX(seq_len_, "fmha ref no transpose seq len");
+    PADDLE_ENFORCE_LE_INT_MAX(out_seq_len, "fmha ref no transpose out seq len");
+    PADDLE_ENFORCE_LE_INT_MAX(head_dim_, "fmha ref no transpose head dim");
+    int gemm_batch_size = static_cast<int>(gemm_batch_size_64);
+    int batch_size = static_cast<int>(batch_size_);
+    int num_head = static_cast<int>(num_head_);
+    int seq_len = static_cast<int>(seq_len_);
+    int head_dim = static_cast<int>(head_dim_);
+    int gemm_m = seq_len;
+    int gemm_n = static_cast<int>(out_seq_len);
+    int gemm_k = head_dim;
     T alpha = static_cast<T>(1.0);
     T beta = static_cast<T>(0.0);
-    int64_t stride_a = gemm_m * gemm_k;
-    int64_t stride_b = gemm_k * gemm_n;
+    int64_t stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    int64_t stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
     blas.BatchedGEMM(transA,
                      transB,
                      gemm_m,
@@ -421,9 +442,9 @@ class FMHARef {
         phi::fusion::LaunchFusedSoftmaxMaskKernel<T>(qk_out_data,
                                                      src_mask_tensor->data<T>(),
                                                      softmax_out_data,
-                                                     batch_size_,
-                                                     num_head_,
-                                                     seq_len_,
+                                                     batch_size,
+                                                     num_head,
+                                                     seq_len,
                                                      dev_ctx_.stream());
       } else {
         std::vector<const DenseTensor*> ins;
@@ -444,12 +465,12 @@ class FMHARef {
     }
 
     transB = CblasNoTrans;
-    gemm_m = seq_len_;
-    gemm_n = head_dim_;
-    gemm_k = out_seq_len;
+    gemm_m = seq_len;
+    gemm_n = head_dim;
+    gemm_k = static_cast<int>(out_seq_len);
     alpha = static_cast<T>(1.0);
-    stride_a = gemm_m * gemm_k;
-    stride_b = gemm_k * gemm_n;
+    stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
 
     if (dropout_param_.dropout_prob_) {
       funcs::DropoutFwGPUKernelDriver<T>(
@@ -504,10 +525,10 @@ class FMHARef {
       InvokeTransposeRemovePadding<T>(dev_ctx_,
                                       qktv_out_data,
                                       fmha_out_data,
-                                      batch_size_,
-                                      num_head_,
-                                      seq_len_,
-                                      head_dim_,
+                                      batch_size,
+                                      num_head,
+                                      seq_len,
+                                      head_dim,
                                       token_num,
                                       padding_offset_tensor->data<int>());
     }
@@ -530,9 +551,17 @@ class FMHARef {
                        DenseTensor* src_mask_grad_tensor,
                        DenseTensor* qkv_input_grad_tensor) {
     auto blas = funcs::GetBlas<GPUContext, T>(dev_ctx_);
-    int q_size = batch_size_ * seq_len_ * num_head_ * head_dim_;
-    int k_size = q_size;
+    int64_t q_size = batch_size_ * seq_len_ * num_head_ * head_dim_;
+    int64_t k_size = q_size;
     int softmax_axis = -1;
+
+    PADDLE_ENFORCE_LE_INT_MAX(seq_len_, "fmha ref seq len");
+    PADDLE_ENFORCE_LE_INT_MAX(head_dim_, "fmha ref head dim");
+    int seq_len = static_cast<int>(seq_len_);
+    int head_dim = static_cast<int>(head_dim_);
+    int64_t gemm_batch_size = batch_size_ * num_head_;
+    PADDLE_ENFORCE_LE_INT_MAX(gemm_batch_size, "fmha ref gemm batch size");
+    int gemm_batch_count = static_cast<int>(gemm_batch_size);
 
     T* qkv_grad_data = transpose_2_out_grad_tensor->data<T>();
     T* q_grad_ptr = qkv_grad_data;
@@ -556,14 +585,13 @@ class FMHARef {
     // qktv_out_data(out)
     CBLAS_TRANSPOSE transA = CblasTrans;
     CBLAS_TRANSPOSE transB = CblasNoTrans;
-    int gemm_batch_size = batch_size_ * num_head_;
-    int gemm_m = seq_len_;
-    int gemm_n = head_dim_;
-    int gemm_k = seq_len_;
+    int gemm_m = seq_len;
+    int gemm_n = head_dim;
+    int gemm_k = seq_len;
     T alpha = static_cast<T>(1.0);
     T beta = static_cast<T>(0.0);
-    int64_t stride_a = gemm_m * gemm_k;
-    int64_t stride_b = gemm_k * gemm_n;
+    int64_t stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    int64_t stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
     // bw: dy = x^t * dout
     if (dropout_param_.dropout_prob_) {
       const T* dropout_out_data = dropout_out_tensor.data<T>();
@@ -577,7 +605,7 @@ class FMHARef {
                        qktv_out_grad_data,
                        beta,
                        v_grad_ptr,
-                       gemm_batch_size,
+                       gemm_batch_count,
                        stride_a,
                        stride_b);
     } else {
@@ -591,18 +619,18 @@ class FMHARef {
                        qktv_out_grad_data,
                        beta,
                        v_grad_ptr,
-                       gemm_batch_size,
+                       gemm_batch_count,
                        stride_a,
                        stride_b);
     }
     // bw: dx = dout * y^t
     transA = CblasNoTrans;
     transB = CblasTrans;
-    gemm_m = seq_len_;
-    gemm_n = seq_len_;
-    gemm_k = head_dim_;
-    stride_a = gemm_m * gemm_k;
-    stride_b = gemm_k * gemm_n;
+    gemm_m = seq_len;
+    gemm_n = seq_len;
+    gemm_k = head_dim;
+    stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
     if (dropout_param_.dropout_prob_) {
       T* dropout_out_grad_data = dropout_out_grad_tensor->data<T>();
       blas.BatchedGEMM(transA,
@@ -615,7 +643,7 @@ class FMHARef {
                        v_ptr,
                        beta,
                        dropout_out_grad_data,
-                       gemm_batch_size,
+                       gemm_batch_count,
                        stride_a,
                        stride_b);
     } else {
@@ -629,7 +657,7 @@ class FMHARef {
                        v_ptr,
                        beta,
                        softmax_out_grad_data,
-                       gemm_batch_size,
+                       gemm_batch_count,
                        stride_a,
                        stride_b);
     }
@@ -687,11 +715,11 @@ class FMHARef {
     // bw: dy (seq_len * head_dim) = (dout)^t * x
     transA = CblasTrans;
     transB = CblasNoTrans;
-    gemm_m = seq_len_;
-    gemm_n = head_dim_;
-    gemm_k = seq_len_;
-    stride_a = gemm_m * gemm_k;
-    stride_b = gemm_k * gemm_n;
+    gemm_m = seq_len;
+    gemm_n = head_dim;
+    gemm_k = seq_len;
+    stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
     blas.BatchedGEMM(transA,
                      transB,
                      gemm_m,
@@ -702,18 +730,18 @@ class FMHARef {
                      q_ptr,
                      beta,
                      k_grad_ptr,
-                     gemm_batch_size,
+                     gemm_batch_count,
                      stride_a,
                      stride_b);
     // dx (seq_len * head_dim) = dout * y
     alpha = static_cast<T>(1.0 / sqrt(head_dim_));
     transA = CblasNoTrans;
     transB = CblasNoTrans;
-    gemm_m = seq_len_;
-    gemm_n = head_dim_;
-    gemm_k = seq_len_;
-    stride_a = gemm_m * gemm_k;
-    stride_b = gemm_k * gemm_n;
+    gemm_m = seq_len;
+    gemm_n = head_dim;
+    gemm_k = seq_len;
+    stride_a = static_cast<int64_t>(gemm_m) * gemm_k;
+    stride_b = static_cast<int64_t>(gemm_k) * gemm_n;
     blas.BatchedGEMM(transA,
                      transB,
                      gemm_m,
@@ -724,7 +752,7 @@ class FMHARef {
                      k_ptr,
                      beta,
                      q_grad_ptr,
-                     gemm_batch_size,
+                     gemm_batch_count,
                      stride_a,
                      stride_b);
 

@@ -29,6 +29,7 @@ limitations under the License. */
 
 #include "paddle/phi/backends/gpu/cuda/cuda_graph_with_memory_pool.h"
 #include "paddle/phi/backends/gpu/gpu_launch_config.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/funcs/broadcast_function.h"
 #include "paddle/phi/kernels/funcs/distribution_helper.h"
 #include "paddle/phi/kernels/funcs/functors.h"
@@ -302,33 +303,40 @@ void DropoutFwGPUKernelDriver(
     // VectorizedRandomGenerator use curand_uniform4, so kVecSize is 4;
     constexpr int kVecSize = funcs::uniform_distribution<float>::kReturnsCount;
 
-    size_t grid_size;
-    size_t block_size;
+    size_t grid_size_limit;
+    size_t block_size_limit;
     size_t offset;
 
     if (funcs::IsDeterministicRNG()) {
       auto cfg = funcs::GetDeterministicRNGConfig(x_numel, kVecSize);
-      grid_size = cfg.grid_size;
-      block_size = cfg.block_size;
+      grid_size_limit = cfg.grid_size;
+      block_size_limit = cfg.block_size;
       offset = cfg.increment;
     } else {
       auto gpu_config =
           phi::backends::gpu::GetGpuLaunchConfig1D(dev_ctx, x_numel, kVecSize);
-      grid_size = gpu_config.GetGridSize();
-      block_size = gpu_config.GetBlockSize();
+      grid_size_limit = gpu_config.GetGridSize();
+      block_size_limit = gpu_config.GetBlockSize();
 
       int64_t device_id = dev_ctx.GetPlace().GetDeviceId();
       const auto& prop = phi::backends::gpu::GetDeviceProperties(device_id);
       size_t max_grid_size = prop.maxThreadsPerMultiProcessor *
-                             prop.multiProcessorCount / block_size;
-      grid_size = std::min(grid_size, max_grid_size);
+                             prop.multiProcessorCount / block_size_limit;
+      grid_size_limit = std::min(grid_size_limit, max_grid_size);
 
       offset =
-          ((x_numel - 1) / (grid_size * block_size * kVecSize) + 1) * kVecSize;
+          ((x_numel - 1) / (grid_size_limit * block_size_limit * kVecSize) +
+           1) *
+          kVecSize;
     }
 
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_size_limit, "dropout grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_size_limit, "dropout block.x");
+    uint32_t grid_size = static_cast<uint32_t>(grid_size_limit);
+    uint32_t block_size = static_cast<uint32_t>(block_size_limit);
+
     size_t main_offset =
-        size / (block_size * kVecSize) * (block_size * kVecSize);
+        size / (block_size_limit * kVecSize) * (block_size_limit * kVecSize);
 
     if (is_dropout_nd) {
       auto mask_functor = MaskFunctor<T>(1.0f - dropout_prob);

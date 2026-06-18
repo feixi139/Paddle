@@ -38,6 +38,7 @@ limitations under the License.
 #include <assert.h>
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/common/amp_type_traits.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/funcs/cub.h"
 #include "paddle/phi/kernels/fusion/gpu/attention_layer.norm.h"
@@ -164,12 +165,21 @@ inline GPU(Error_t) GetNumBlocks(Func func,
   }
   int max_active_blocks;
   {
+    PADDLE_ENFORCE_LE_INT_MAX(block_size, "fused layernorm block size");
     GPU(Error_t)
     err = GPU(OccupancyMaxActiveBlocksPerMultiprocessor)(
-        &max_active_blocks, func, block_size, dynamic_smem_size);
+        &max_active_blocks,
+        func,
+        static_cast<int>(block_size),
+        dynamic_smem_size);
   }
-  *num_blocks = std::max<int>(
-      1, std::min<int64_t>(max_blocks, sm_count * max_active_blocks * waves));
+  int64_t block_count =
+      std::max<int64_t>(1,
+                        std::min<int64_t>(max_blocks,
+                                          static_cast<int64_t>(sm_count) *
+                                              max_active_blocks * waves));
+  PADDLE_ENFORCE_LE_INT_MAX(block_count, "fused layernorm num blocks");
+  *num_blocks = static_cast<int>(block_count);
   return GPU(Success);
 }
 
@@ -546,8 +556,10 @@ inline GPU(Error_t)
     }
   }
 
-  const size_t smem = cols * sizeof(typename LOAD::LoadType);
+  const int64_t smem =
+      cols * static_cast<int64_t>(sizeof(typename LOAD::LoadType));
 
+  PADDLE_ENFORCE_LE_INT_MAX(smem, "fused layernorm shared memory");
   *success = true;
   return LaunchLayerNormBlockSMemImpl<LOAD,
                                       STORE,
@@ -556,7 +568,7 @@ inline GPU(Error_t)
                                       block_size_conf_1>(stream,
                                                          load,
                                                          store,
-                                                         smem,
+                                                         static_cast<int>(smem),
                                                          rows,
                                                          cols,
                                                          epsilon,

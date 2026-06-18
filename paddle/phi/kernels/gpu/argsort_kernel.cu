@@ -18,6 +18,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/backends/gpu/gpu_info.h"
 #include "paddle/phi/backends/gpu/gpu_launch_config.h"
@@ -214,6 +215,7 @@ void ArgFullSort(const GPUContext& dev_ctx,
                  const int64_t num_cols,
                  const bool descending) {
   PADDLE_ENFORCE_LE_INT_MAX(num_cols, "num_cols");
+  int num_cols_int = static_cast<int>(num_cols);
 
   auto cu_stream = dev_ctx.stream();
   auto ComputeBlockSize = [](IndType col) {
@@ -238,7 +240,7 @@ void ArgFullSort(const GPUContext& dev_ctx,
   cub::TransformInputIterator<IndType,
                               SegmentOffsetIter,
                               cub::CountingInputIterator<IndType>>
-      segment_offsets_t(counting_iter, SegmentOffsetIter(num_cols));
+      segment_offsets_t(counting_iter, SegmentOffsetIter(num_cols_int));
 
   // num_rows is the total segments to be sorted
   constexpr int64_t max_elements = 1 << 30;
@@ -273,7 +275,9 @@ void ArgFullSort(const GPUContext& dev_ctx,
       input_indices.Resize({n_segments, segment_size});
       ind_ptr = dev_ctx.template Alloc<IndType>(&input_indices);
     }
-    const int64_t grid_size = std::min(n_segments, maxGridDimX);
+    const int64_t grid_size64 = std::min(n_segments, maxGridDimX);
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_size64, "FillIndex grid.x");
+    uint32_t grid_size = static_cast<uint32_t>(grid_size64);
     // Init a index array
     FillIndex<<<grid_size, block_size, 0, cu_stream>>>(
         ind_ptr, n_segments, segment_size);

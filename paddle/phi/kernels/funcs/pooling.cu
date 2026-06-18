@@ -14,6 +14,7 @@ limitations under the License. */
 
 #include <algorithm>
 #include <vector>
+#include "paddle/common/enforce.h"
 #include "paddle/phi/kernels/funcs/index_elementwise.cu.h"
 #ifdef __NVCC__
 #include <curand_kernel.h>
@@ -569,6 +570,7 @@ void Pool2dDirectCUDAFunctor<PoolProcess, T>::operator()(
   const int padding_width = paddings[1];
   int64_t nthreads = static_cast<int64_t>(batch_size) * output_channels *
                      output_height * output_width;
+  PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
   auto pool_divmods =
       FastDivModForPooling<int>(input_channels, output_width, output_height);
   if (adaptive) {
@@ -579,13 +581,18 @@ void Pool2dDirectCUDAFunctor<PoolProcess, T>::operator()(
                               static_cast<int64_t>(output_channels));
     auto max_grid_dim = backends::gpu::GetGpuMaxGridDimSize(
         phi::backends::gpu::GetCurrentDeviceId());
-    dim3 threads(thread_num, blocks, 1);
-    dim3 grid(std::max((output_channels + blocks - 1) / blocks,
-                       static_cast<int64_t>(1)),
+    PADDLE_ENFORCE_LE_UINT32_MAX(thread_num, "pool2d threads.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pool2d threads.y");
+    dim3 threads(
+        static_cast<uint32_t>(thread_num), static_cast<uint32_t>(blocks), 1);
+    const int64_t grid_x = std::max((output_channels + blocks - 1) / blocks,
+                                    static_cast<int64_t>(1));
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_x, "pool2d grid.x");
+    dim3 grid(static_cast<uint32_t>(grid_x),
               std::min(batch_size, static_cast<int>(max_grid_dim[1])),
               1);
     AdaptiveKernelPool2D<PoolProcess, T, int>
-        <<<grid, threads, 0, stream>>>(nthreads,
+        <<<grid, threads, 0, stream>>>(static_cast<int>(nthreads),
                                        input,
                                        input_channels,
                                        input_height,
@@ -605,16 +612,17 @@ void Pool2dDirectCUDAFunctor<PoolProcess, T>::operator()(
                                        output);
 
   } else {
-    int thread_num = 1024;
+    uint32_t thread_num = 1024;
 #ifdef WITH_NV_JETSON
     // backends::gpu::ChangeThreadNum(dev_ctx, &thread_num);
     thread_num = 512;
 #endif
-    int blocks = (nthreads + thread_num - 1) / thread_num;
+    int64_t blocks = (nthreads + thread_num - 1) / thread_num;
+    PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pool2d grid.x");
     dim3 threads(thread_num, 1);
-    dim3 grid(blocks, 1);
+    dim3 grid(static_cast<uint32_t>(blocks), 1);
     KernelPool2D<PoolProcess, T, int>
-        <<<grid, threads, 0, stream>>>(nthreads,
+        <<<grid, threads, 0, stream>>>(static_cast<int>(nthreads),
                                        input,
                                        input_channels,
                                        input_height,
@@ -686,6 +694,21 @@ class Pool2dFunctor<GPUContext, PoolProcess, T> {
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t nthreads =
         batch_size * output_channels * output_height * output_width;
+    const bool use_int_index = input.numel() <= std::numeric_limits<int>::max();
+    if (use_int_index) {
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+    }
     if (adaptive) {
       int64_t max_threads = 512;
       int64_t thread_num =
@@ -693,34 +716,44 @@ class Pool2dFunctor<GPUContext, PoolProcess, T> {
                    max_threads);
       int64_t blocks = std::min(max_threads / thread_num,
                                 static_cast<int64_t>(output_channels));
-      dim3 threads(thread_num, blocks, 1);
-      dim3 grid(std::max((output_channels + blocks - 1) / blocks,
-                         static_cast<int64_t>(1)),
-                std::min(batch_size, static_cast<int64_t>(max_grid_dim[1])),
-                1);
-      if (input.numel() <= std::numeric_limits<int>::max()) {
-        auto pool_divmods = FastDivModForPooling<int>(
-            input_channels, output_width, output_height);
+      PADDLE_ENFORCE_LE_UINT32_MAX(thread_num, "pool2d threads.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pool2d threads.y");
+      dim3 threads(
+          static_cast<uint32_t>(thread_num), static_cast<uint32_t>(blocks), 1);
+      const int64_t grid_x = std::max((output_channels + blocks - 1) / blocks,
+                                      static_cast<int64_t>(1));
+      const int64_t grid_y =
+          std::min(batch_size, static_cast<int64_t>(max_grid_dim[1]));
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid_x, "pool2d grid.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid_y, "pool2d grid.y");
+      dim3 grid(
+          static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y), 1);
+      if (use_int_index) {
+        auto pool_divmods =
+            FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height));
         AdaptiveKernelPool2D<PoolProcess, T, int>
-            <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                     input_data,
-                                                     input_channels,
-                                                     input_height,
-                                                     input_width,
-                                                     output_height,
-                                                     output_width,
-                                                     ksize_height,
-                                                     ksize_width,
-                                                     stride_height,
-                                                     stride_width,
-                                                     padding_height,
-                                                     padding_width,
-                                                     batch_size,
-                                                     pool_divmods,
-                                                     pool_process,
-                                                     exclusive,
-                                                     output_data,
-                                                     channel_last);
+            <<<grid, threads, 0, dev_ctx.stream()>>>(
+                static_cast<int>(nthreads),
+                input_data,
+                static_cast<int>(input_channels),
+                static_cast<int>(input_height),
+                static_cast<int>(input_width),
+                static_cast<int>(output_height),
+                static_cast<int>(output_width),
+                static_cast<int>(ksize_height),
+                static_cast<int>(ksize_width),
+                static_cast<int>(stride_height),
+                static_cast<int>(stride_width),
+                static_cast<int>(padding_height),
+                static_cast<int>(padding_width),
+                static_cast<int>(batch_size),
+                pool_divmods,
+                pool_process,
+                exclusive,
+                output_data,
+                channel_last);
       } else {
         auto pool_divmods = FastDivModForPooling<int64_t>(
             input_channels, output_width, output_height);
@@ -752,29 +785,33 @@ class Pool2dFunctor<GPUContext, PoolProcess, T> {
 #endif
       int64_t blocks = (nthreads + thread_num - 1) / thread_num;
       dim3 threads(thread_num, 1);
-      dim3 grid(blocks, 1);
-      if (input.numel() <= std::numeric_limits<int>::max()) {
-        auto pool_divmods = FastDivModForPooling<int>(
-            input_channels, output_width, output_height);
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+      dim3 grid(static_cast<uint32_t>(blocks), 1);
+      if (use_int_index) {
+        auto pool_divmods =
+            FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height));
         KernelPool2D<PoolProcess, T, int>
-            <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                     input_data,
-                                                     input_channels,
-                                                     input_height,
-                                                     input_width,
-                                                     output_height,
-                                                     output_width,
-                                                     ksize_height,
-                                                     ksize_width,
-                                                     stride_height,
-                                                     stride_width,
-                                                     padding_height,
-                                                     padding_width,
-                                                     pool_divmods,
-                                                     pool_process,
-                                                     exclusive,
-                                                     output_data,
-                                                     channel_last);
+            <<<grid, threads, 0, dev_ctx.stream()>>>(
+                static_cast<int>(nthreads),
+                input_data,
+                static_cast<int>(input_channels),
+                static_cast<int>(input_height),
+                static_cast<int>(input_width),
+                static_cast<int>(output_height),
+                static_cast<int>(output_width),
+                static_cast<int>(ksize_height),
+                static_cast<int>(ksize_width),
+                static_cast<int>(stride_height),
+                static_cast<int>(stride_width),
+                static_cast<int>(padding_height),
+                static_cast<int>(padding_width),
+                pool_divmods,
+                pool_process,
+                exclusive,
+                output_data,
+                channel_last);
       } else {
         auto pool_divmods = FastDivModForPooling<int64_t>(
             input_channels, output_width, output_height);
@@ -858,31 +895,43 @@ class Pool2dGradFunctor<GPUContext, PoolProcess, T> {
     auto config = phi::backends::gpu::GetGpuLaunchConfig1D(dev_ctx, nthreads);
     if (input.numel() <= std::numeric_limits<int>::max() &&
         output.numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods = FastDivModForPoolingWithMoreStaff<int>(input_channels,
-                                                                 input_width,
-                                                                 input_height,
-                                                                 ksize_width,
-                                                                 ksize_height,
-                                                                 stride_width,
-                                                                 stride_height);
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+      auto pool_divmods = FastDivModForPoolingWithMoreStaff<int>(
+          static_cast<int>(input_channels),
+          static_cast<int>(input_width),
+          static_cast<int>(input_height),
+          static_cast<int>(ksize_width),
+          static_cast<int>(ksize_height),
+          static_cast<int>(stride_width),
+          static_cast<int>(stride_height));
       KernelPool2DGrad<T, PoolProcess, int>
           <<<config.block_per_grid,
              config.thread_per_block,
              0,
-             dev_ctx.stream()>>>(nthreads,
+             dev_ctx.stream()>>>(static_cast<int>(nthreads),
                                  input_data,
                                  output_data,
                                  output_grad_data,
-                                 output_width,
-                                 output_height,
-                                 input_width,
-                                 input_height,
-                                 ksize_width,
-                                 ksize_height,
-                                 stride_width,
-                                 stride_height,
-                                 padding_width,
-                                 padding_height,
+                                 static_cast<int>(output_width),
+                                 static_cast<int>(output_height),
+                                 static_cast<int>(input_width),
+                                 static_cast<int>(input_height),
+                                 static_cast<int>(ksize_width),
+                                 static_cast<int>(ksize_height),
+                                 static_cast<int>(stride_width),
+                                 static_cast<int>(stride_height),
+                                 static_cast<int>(padding_width),
+                                 static_cast<int>(padding_height),
                                  pool_divmods,
                                  pool_process,
                                  exclusive,
@@ -985,57 +1034,79 @@ class MaxPool2dGradFunctor<GPUContext, T> {
 
     if (input.numel() <= std::numeric_limits<int>::max() &&
         output.numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods = FastDivModForPooling<int>(
-          input_channels, output_width, output_height);
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(batch_size, "pooling batch_size");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+      auto pool_divmods =
+          FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                    static_cast<int>(output_width),
+                                    static_cast<int>(output_height));
       if (FLAGS_use_accuracy_compatible_kernel) {
         int64_t blocks =
             (input_width * input_height + kBlockThreads - 1) / kBlockThreads;
-        dim3 grid(blocks, batch_size, input_channels);
+        PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+        PADDLE_ENFORCE_LE_UINT32_MAX(batch_size, "pooling grid.y");
+        PADDLE_ENFORCE_LE_UINT32_MAX(input_channels, "pooling grid.z");
+        dim3 grid(static_cast<uint32_t>(blocks),
+                  static_cast<uint32_t>(batch_size),
+                  static_cast<uint32_t>(input_channels));
         // NOTE: input.numel() <= std::numeric_limits<int>::max() &&
         // output.numel() <= std::numeric_limits<int>::max()
         KernelMaxPool2DGradCompatible<T, int>
-            <<<grid, threads, 0, dev_ctx.stream()>>>(input_data,
-                                                     output_data,
-                                                     output_grad_data,
-                                                     batch_size,
-                                                     input_channels,
-                                                     input_height,
-                                                     input_width,
-                                                     output_height,
-                                                     output_width,
-                                                     ksize_height,
-                                                     ksize_width,
-                                                     stride_height,
-                                                     stride_width,
-                                                     padding_height,
-                                                     padding_width,
-                                                     input_grad_data,
-                                                     pool_divmods,
-                                                     channel_last);
+            <<<grid, threads, 0, dev_ctx.stream()>>>(
+                input_data,
+                output_data,
+                output_grad_data,
+                static_cast<int>(batch_size),
+                static_cast<int>(input_channels),
+                static_cast<int>(input_height),
+                static_cast<int>(input_width),
+                static_cast<int>(output_height),
+                static_cast<int>(output_width),
+                static_cast<int>(ksize_height),
+                static_cast<int>(ksize_width),
+                static_cast<int>(stride_height),
+                static_cast<int>(stride_width),
+                static_cast<int>(padding_height),
+                static_cast<int>(padding_width),
+                input_grad_data,
+                pool_divmods,
+                channel_last);
       } else {
         int64_t blocks = (nthreads + kBlockThreads - 1) / kBlockThreads;
-        dim3 grid(blocks, 1);
+        PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+        dim3 grid(static_cast<uint32_t>(blocks), 1);
         // NOTE: input.numel() <= std::numeric_limits<int>::max() &&
         // output.numel() <= std::numeric_limits<int>::max()
-        KernelMaxPool2DGrad<T, int>
-            <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                     input_data,
-                                                     output_data,
-                                                     output_grad_data,
-                                                     input_channels,
-                                                     input_height,
-                                                     input_width,
-                                                     output_height,
-                                                     output_width,
-                                                     ksize_height,
-                                                     ksize_width,
-                                                     stride_height,
-                                                     stride_width,
-                                                     padding_height,
-                                                     padding_width,
-                                                     input_grad_data,
-                                                     pool_divmods,
-                                                     channel_last);
+        KernelMaxPool2DGrad<T, int><<<grid, threads, 0, dev_ctx.stream()>>>(
+            static_cast<int>(nthreads),
+            input_data,
+            output_data,
+            output_grad_data,
+            static_cast<int>(input_channels),
+            static_cast<int>(input_height),
+            static_cast<int>(input_width),
+            static_cast<int>(output_height),
+            static_cast<int>(output_width),
+            static_cast<int>(ksize_height),
+            static_cast<int>(ksize_width),
+            static_cast<int>(stride_height),
+            static_cast<int>(stride_width),
+            static_cast<int>(padding_height),
+            static_cast<int>(padding_width),
+            input_grad_data,
+            pool_divmods,
+            channel_last);
       }
 
     } else {
@@ -1044,7 +1115,12 @@ class MaxPool2dGradFunctor<GPUContext, T> {
       if (FLAGS_use_accuracy_compatible_kernel) {
         int64_t blocks =
             (input_width * input_height + kBlockThreads - 1) / kBlockThreads;
-        dim3 grid(blocks, batch_size, input_channels);
+        PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+        PADDLE_ENFORCE_LE_UINT32_MAX(batch_size, "pooling grid.y");
+        PADDLE_ENFORCE_LE_UINT32_MAX(input_channels, "pooling grid.z");
+        dim3 grid(static_cast<uint32_t>(blocks),
+                  static_cast<uint32_t>(batch_size),
+                  static_cast<uint32_t>(input_channels));
         KernelMaxPool2DGradCompatible<T, int64_t>
             <<<grid, threads, 0, dev_ctx.stream()>>>(input_data,
                                                      output_data,
@@ -1066,7 +1142,8 @@ class MaxPool2dGradFunctor<GPUContext, T> {
                                                      channel_last);
       } else {
         int64_t blocks = (nthreads + kBlockThreads - 1) / kBlockThreads;
-        dim3 grid(blocks, 1);
+        PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+        dim3 grid(static_cast<uint32_t>(blocks), 1);
         KernelMaxPool2DGrad<T, int64_t>
             <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
                                                      input_data,
@@ -1525,7 +1602,8 @@ void Pool3dDirectCUDAFunctor<PoolProcess, T>::operator()(
 #endif
   int blocks = (nthreads + thread_num - 1) / thread_num;
   dim3 threads(thread_num, 1);
-  dim3 grid(blocks, 1);
+  PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+  dim3 grid(static_cast<uint32_t>(blocks), 1);
 
   KernelPool3D<PoolProcess, T, int>
       <<<grid, threads, 0, stream>>>(nthreads,
@@ -1613,37 +1691,55 @@ class Pool3dFunctor<GPUContext, PoolProcess, T> {
                        output_height * output_width;
 
     if (input.numel() <= std::numeric_limits<int>::max()) {
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_depth, "pooling ksize_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_depth, "pooling stride_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_depth, "pooling padding_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
       int thread_num = 1024;
 #ifdef WITH_NV_JETSON
       backends::gpu::ChangeThreadNum(dev_ctx, &thread_num);
 #endif
       int64_t blocks = (nthreads + thread_num - 1) / thread_num;
       dim3 threads(thread_num, 1);
-      dim3 grid(blocks, 1);
-      KernelPool3D<PoolProcess, T, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                   input_data,
-                                                   input_channels,
-                                                   input_depth,
-                                                   input_height,
-                                                   input_width,
-                                                   output_depth,
-                                                   output_height,
-                                                   output_width,
-                                                   ksize_depth,
-                                                   ksize_height,
-                                                   ksize_width,
-                                                   stride_depth,
-                                                   stride_height,
-                                                   stride_width,
-                                                   padding_depth,
-                                                   padding_height,
-                                                   padding_width,
-                                                   pool_process,
-                                                   exclusive,
-                                                   adaptive,
-                                                   output_data,
-                                                   channel_last);
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+      dim3 grid(static_cast<uint32_t>(blocks), 1);
+      KernelPool3D<PoolProcess, T, int><<<grid, threads, 0, dev_ctx.stream()>>>(
+          static_cast<int>(nthreads),
+          input_data,
+          static_cast<int>(input_channels),
+          static_cast<int>(input_depth),
+          static_cast<int>(input_height),
+          static_cast<int>(input_width),
+          static_cast<int>(output_depth),
+          static_cast<int>(output_height),
+          static_cast<int>(output_width),
+          static_cast<int>(ksize_depth),
+          static_cast<int>(ksize_height),
+          static_cast<int>(ksize_width),
+          static_cast<int>(stride_depth),
+          static_cast<int>(stride_height),
+          static_cast<int>(stride_width),
+          static_cast<int>(padding_depth),
+          static_cast<int>(padding_height),
+          static_cast<int>(padding_width),
+          pool_process,
+          exclusive,
+          adaptive,
+          output_data,
+          channel_last);
     } else {
       int thread_num = 512;
 #ifdef WITH_NV_JETSON
@@ -1651,7 +1747,8 @@ class Pool3dFunctor<GPUContext, PoolProcess, T> {
 #endif
       int64_t blocks = (nthreads + thread_num - 1) / thread_num;
       dim3 threads(thread_num, 1);
-      dim3 grid(blocks, 1);
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+      dim3 grid(static_cast<uint32_t>(blocks), 1);
       KernelPool3D<PoolProcess, T, int64_t>
           <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
                                                    input_data,
@@ -1746,32 +1843,50 @@ class Pool3dGradFunctor<GPUContext, PoolProcess, T> {
 
     if (input.numel() <= std::numeric_limits<int>::max() &&
         output.numel() <= std::numeric_limits<int>::max()) {
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_depth, "pooling ksize_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_depth, "pooling stride_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_depth, "pooling padding_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
       int thread_num = 1024;
       int64_t blocks = (nthreads + thread_num - 1) / thread_num;
       dim3 threads(thread_num, 1);
-      dim3 grid(blocks, 1);
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+      dim3 grid(static_cast<uint32_t>(blocks), 1);
       KernelPool3DGrad<T, PoolProcess, int>
           <<<grid, threads, 0, dev_ctx.stream()>>>(
-              nthreads,
+              static_cast<int>(nthreads),
               input_data,
               output_data,
               output_grad_data,
-              input_channels,
-              input_depth,
-              input_height,
-              input_width,
-              output_depth,
-              output_height,
-              output_width,
-              ksize_depth,
-              ksize_height,
-              ksize_width,
-              stride_depth,
-              stride_height,
-              stride_width,
-              padding_depth,
-              padding_height,
-              padding_width,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_depth),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_depth),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(ksize_depth),
+              static_cast<int>(ksize_height),
+              static_cast<int>(ksize_width),
+              static_cast<int>(stride_depth),
+              static_cast<int>(stride_height),
+              static_cast<int>(stride_width),
+              static_cast<int>(padding_depth),
+              static_cast<int>(padding_height),
+              static_cast<int>(padding_width),
               pool_process,
               exclusive,
               adaptive,
@@ -1781,7 +1896,8 @@ class Pool3dGradFunctor<GPUContext, PoolProcess, T> {
       int thread_num = 512;
       int64_t blocks = (nthreads + thread_num - 1) / thread_num;
       dim3 threads(thread_num, 1);
-      dim3 grid(blocks, 1);
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+      dim3 grid(static_cast<uint32_t>(blocks), 1);
       KernelPool3DGrad<T, PoolProcess, int64_t>
           <<<grid, threads, 0, dev_ctx.stream()>>>(
               nthreads,
@@ -1875,30 +1991,48 @@ class MaxPool3dGradFunctor<GPUContext, T> {
                        output_height * output_width;
     int64_t blocks = (nthreads + 1024 - 1) / 1024;
     dim3 threads(1024, 1);
-    dim3 grid(blocks, 1);
+    PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+    dim3 grid(static_cast<uint32_t>(blocks), 1);
     if (input.numel() <= std::numeric_limits<int>::max() &&
         output.numel() <= std::numeric_limits<int>::max()) {
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_depth, "pooling ksize_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_depth, "pooling stride_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_depth, "pooling padding_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
       KernelMaxPool3DGrad<T, int><<<grid, threads, 0, dev_ctx.stream()>>>(
-          nthreads,
+          static_cast<int>(nthreads),
           input_data,
           output_data,
           output_grad_data,
-          input_channels,
-          input_depth,
-          input_height,
-          input_width,
-          output_depth,
-          output_height,
-          output_width,
-          ksize_depth,
-          ksize_height,
-          ksize_width,
-          stride_depth,
-          stride_height,
-          stride_width,
-          padding_depth,
-          padding_height,
-          padding_width,
+          static_cast<int>(input_channels),
+          static_cast<int>(input_depth),
+          static_cast<int>(input_height),
+          static_cast<int>(input_width),
+          static_cast<int>(output_depth),
+          static_cast<int>(output_height),
+          static_cast<int>(output_width),
+          static_cast<int>(ksize_depth),
+          static_cast<int>(ksize_height),
+          static_cast<int>(ksize_width),
+          static_cast<int>(stride_depth),
+          static_cast<int>(stride_height),
+          static_cast<int>(stride_width),
+          static_cast<int>(padding_depth),
+          static_cast<int>(padding_height),
+          static_cast<int>(padding_width),
           input_grad_data,
           channel_last);  // add channel_last
     } else {
@@ -2268,34 +2402,57 @@ class MaxPool2dWithIndexFunctor<GPUContext, T1, T2> {
                    max_threads);
       int64_t blocks = std::min(max_threads / thread_num,
                                 static_cast<int64_t>(output_channels));
-      dim3 threads(thread_num, blocks, 1);
+      PADDLE_ENFORCE_LE_UINT32_MAX(thread_num, "max_pool2d_with_idx threads.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "max_pool2d_with_idx threads.y");
+      dim3 threads(
+          static_cast<uint32_t>(thread_num), static_cast<uint32_t>(blocks), 1);
       std::array<unsigned int, 3> max_grid_dim =
           dev_ctx.GetCUDAMaxGridDimSize();
-      dim3 grid(std::max((output_channels + blocks - 1) / blocks,
-                         static_cast<int64_t>(1)),
-                std::min(batch_size, static_cast<int64_t>(max_grid_dim[1])),
-                1);
+      const int64_t grid_x = std::max((output_channels + blocks - 1) / blocks,
+                                      static_cast<int64_t>(1));
+      const int64_t grid_y =
+          std::min(batch_size, static_cast<int64_t>(max_grid_dim[1]));
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid_x, "max_pool2d_with_idx grid.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid_y, "max_pool2d_with_idx grid.y");
+      dim3 grid(
+          static_cast<uint32_t>(grid_x), static_cast<uint32_t>(grid_y), 1);
       if (input.numel() <= std::numeric_limits<int>::max()) {
-        auto pool_divmods = FastDivModForPooling<int>(
-            input_channels, output_width, output_height);
+        PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+        PADDLE_ENFORCE_LE_INT_MAX(batch_size, "pooling batch_size");
+        PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+        PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+        PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+        PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+        PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+        PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+        PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+        PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+        PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+        PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+        PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+        auto pool_divmods =
+            FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height));
         AdaptiveKernelMaxPool2dWithIdx<T1, T2, int>
-            <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                     input_data,
-                                                     input_channels,
-                                                     input_height,
-                                                     input_width,
-                                                     output_height,
-                                                     output_width,
-                                                     ksize_height,
-                                                     ksize_width,
-                                                     stride_height,
-                                                     stride_width,
-                                                     padding_height,
-                                                     padding_width,
-                                                     batch_size,
-                                                     output_data,
-                                                     mask_data,
-                                                     pool_divmods);
+            <<<grid, threads, 0, dev_ctx.stream()>>>(
+                static_cast<int>(nthreads),
+                input_data,
+                static_cast<int>(input_channels),
+                static_cast<int>(input_height),
+                static_cast<int>(input_width),
+                static_cast<int>(output_height),
+                static_cast<int>(output_width),
+                static_cast<int>(ksize_height),
+                static_cast<int>(ksize_width),
+                static_cast<int>(stride_height),
+                static_cast<int>(stride_width),
+                static_cast<int>(padding_height),
+                static_cast<int>(padding_width),
+                static_cast<int>(batch_size),
+                output_data,
+                mask_data,
+                pool_divmods);
       } else {
         auto pool_divmods = FastDivModForPooling<int64_t>(
             input_channels, output_width, output_height);
@@ -2325,30 +2482,48 @@ class MaxPool2dWithIndexFunctor<GPUContext, T1, T2> {
 #endif
       int64_t blocks = (nthreads + thread_num - 1) / thread_num;
       dim3 threads(thread_num, 1);
-      dim3 grid(blocks, 1);
+      PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+      dim3 grid(static_cast<uint32_t>(blocks), 1);
       if (input.numel() <= std::numeric_limits<int>::max()) {
-        auto pool_divmods = FastDivModForPooling<int>(
-            input_channels, output_width, output_height);
+        PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+        PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+        PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+        PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+        PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+        PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+        PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+        PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+        PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+        PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+        PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+        PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+        PADDLE_ENFORCE_LE_INT_MAX(dilation_height, "pooling dilation_height");
+        PADDLE_ENFORCE_LE_INT_MAX(dilation_width, "pooling dilation_width");
+        auto pool_divmods =
+            FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height));
         KernelMaxPool2dWithIdx<T1, T2, int>
-            <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                     input_data,
-                                                     input_channels,
-                                                     input_height,
-                                                     input_width,
-                                                     output_height,
-                                                     output_width,
-                                                     ksize_height,
-                                                     ksize_width,
-                                                     stride_height,
-                                                     stride_width,
-                                                     padding_height,
-                                                     padding_width,
-                                                     dilation_height,
-                                                     dilation_width,
-                                                     adaptive,
-                                                     output_data,
-                                                     mask_data,
-                                                     pool_divmods);
+            <<<grid, threads, 0, dev_ctx.stream()>>>(
+                static_cast<int>(nthreads),
+                input_data,
+                static_cast<int>(input_channels),
+                static_cast<int>(input_height),
+                static_cast<int>(input_width),
+                static_cast<int>(output_height),
+                static_cast<int>(output_width),
+                static_cast<int>(ksize_height),
+                static_cast<int>(ksize_width),
+                static_cast<int>(stride_height),
+                static_cast<int>(stride_width),
+                static_cast<int>(padding_height),
+                static_cast<int>(padding_width),
+                static_cast<int>(dilation_height),
+                static_cast<int>(dilation_width),
+                adaptive,
+                output_data,
+                mask_data,
+                pool_divmods);
       } else {
         auto pool_divmods = FastDivModForPooling<int64_t>(
             input_channels, output_width, output_height);
@@ -2428,31 +2603,49 @@ class MaxPool2dWithIndexGradFunctor<GPUContext, T1, T2> {
                        input_height * input_width;
     int64_t blocks = (nthreads + 1024 - 1) / 1024;
     dim3 threads(1024, 1);
-    dim3 grid(blocks, 1);
+    PADDLE_ENFORCE_LE_UINT32_MAX(blocks, "pooling grid.x");
+    dim3 grid(static_cast<uint32_t>(blocks), 1);
 
     if (nthreads <= std::numeric_limits<int>::max()) {
+      PADDLE_ENFORCE_LE_INT_MAX(nthreads, "pooling nthreads");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+      PADDLE_ENFORCE_LE_INT_MAX(dilation_height, "pooling dilation_height");
+      PADDLE_ENFORCE_LE_INT_MAX(dilation_width, "pooling dilation_width");
       auto pool_divmods =
-          FastDivModForPooling<int>(input_channels, input_width, input_height);
+          FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                    static_cast<int>(input_width),
+                                    static_cast<int>(input_height));
       KernelMaxPool2DWithIdxGrad<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(nthreads,
-                                                   output_grad_data,
-                                                   mask_data,
-                                                   input_channels,
-                                                   input_height,
-                                                   input_width,
-                                                   output_height,
-                                                   output_width,
-                                                   ksize_height,
-                                                   ksize_width,
-                                                   stride_height,
-                                                   stride_width,
-                                                   padding_height,
-                                                   padding_width,
-                                                   dilation_height,
-                                                   dilation_width,
-                                                   adaptive,
-                                                   input_grad_data,
-                                                   pool_divmods);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(nthreads),
+              output_grad_data,
+              mask_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(ksize_height),
+              static_cast<int>(ksize_width),
+              static_cast<int>(stride_height),
+              static_cast<int>(stride_width),
+              static_cast<int>(padding_height),
+              static_cast<int>(padding_width),
+              static_cast<int>(dilation_height),
+              static_cast<int>(dilation_width),
+              adaptive,
+              input_grad_data,
+              pool_divmods);
     } else {
       auto pool_divmods = FastDivModForPooling<int64_t>(
           input_channels, input_width, input_height);
@@ -2721,9 +2914,9 @@ class MaxPool3dWithIndexFunctor<GPUContext, T1, T2> {
     int64_t ncd =
         static_cast<int64_t>(batch_size) * input_channels * output_depth;
 
-    int64_t thread_x = 32;
-    int64_t thread_y = 8;
-    int64_t thread_z = 1;
+    uint32_t thread_x = 32;
+    uint32_t thread_y = 8;
+    uint32_t thread_z = 1;
     dim3 threads(thread_x, thread_y, thread_z);
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t block_x = (output_width + threads.x - 1) / threads.x;
@@ -2733,37 +2926,66 @@ class MaxPool3dWithIndexFunctor<GPUContext, T1, T2> {
     int64_t block_z = (ncd > max_grid_dim[2] * threads.z)
                           ? max_grid_dim[2]
                           : (ncd + threads.z - 1) / threads.z;
-    dim3 grid(block_x, block_y, block_z);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "pooling grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_y, "pooling grid.y");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_z, "pooling grid.z");
+    dim3 grid(static_cast<uint32_t>(block_x),
+              static_cast<uint32_t>(block_y),
+              static_cast<uint32_t>(block_z));
 
     if (input.numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods_output = FastDivModForPooling3D<int>(
-          input_channels, output_width, output_height, output_depth);
+      PADDLE_ENFORCE_LE_INT_MAX(ncd, "pooling ncd");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_depth, "pooling ksize_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_depth, "pooling stride_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_depth, "pooling padding_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+      PADDLE_ENFORCE_LE_INT_MAX(dilation_depth, "pooling dilation_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(dilation_height, "pooling dilation_height");
+      PADDLE_ENFORCE_LE_INT_MAX(dilation_width, "pooling dilation_width");
+      auto pool_divmods_output =
+          FastDivModForPooling3D<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height),
+                                      static_cast<int>(output_depth));
       KernelMaxPool3DWithIdx<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(ncd,
-                                                   input_data,
-                                                   input_channels,
-                                                   input_depth,
-                                                   input_height,
-                                                   input_width,
-                                                   output_depth,
-                                                   output_height,
-                                                   output_width,
-                                                   ksize_depth,
-                                                   ksize_height,
-                                                   ksize_width,
-                                                   stride_depth,
-                                                   stride_height,
-                                                   stride_width,
-                                                   padding_depth,
-                                                   padding_height,
-                                                   padding_width,
-                                                   dilation_depth,
-                                                   dilation_height,
-                                                   dilation_width,
-                                                   adaptive,
-                                                   output_data,
-                                                   mask_data,
-                                                   pool_divmods_output);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(ncd),
+              input_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_depth),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_depth),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(ksize_depth),
+              static_cast<int>(ksize_height),
+              static_cast<int>(ksize_width),
+              static_cast<int>(stride_depth),
+              static_cast<int>(stride_height),
+              static_cast<int>(stride_width),
+              static_cast<int>(padding_depth),
+              static_cast<int>(padding_height),
+              static_cast<int>(padding_width),
+              static_cast<int>(dilation_depth),
+              static_cast<int>(dilation_height),
+              static_cast<int>(dilation_width),
+              adaptive,
+              output_data,
+              mask_data,
+              pool_divmods_output);
     } else {
       auto pool_divmods_output = FastDivModForPooling3D<int64_t>(
           input_channels, output_width, output_height, output_depth);
@@ -2838,9 +3060,9 @@ class MaxPool3dWithIndexGradFunctor<GPUContext, T1, T2> {
 
     int64_t ncd = batch_size * input_channels * output_depth;
 
-    int64_t thread_x = 32;
-    int64_t thread_y = 8;
-    int64_t thread_z = 1;
+    uint32_t thread_x = 32;
+    uint32_t thread_y = 8;
+    uint32_t thread_z = 1;
     dim3 threads(thread_x, thread_y, thread_z);
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t block_x = (output_width + threads.x - 1) / threads.x;
@@ -2850,34 +3072,60 @@ class MaxPool3dWithIndexGradFunctor<GPUContext, T1, T2> {
     int64_t block_z = (ncd > max_grid_dim[2] * threads.z)
                           ? max_grid_dim[2]
                           : (ncd + threads.z - 1) / threads.z;
-    dim3 grid(block_x, block_y, block_z);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "pooling grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_y, "pooling grid.y");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_z, "pooling grid.z");
+    dim3 grid(static_cast<uint32_t>(block_x),
+              static_cast<uint32_t>(block_y),
+              static_cast<uint32_t>(block_z));
 
     if (input_grad->numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods_output = FastDivModForPooling3D<int>(
-          input_channels, output_width, output_height, output_depth);
+      PADDLE_ENFORCE_LE_INT_MAX(ncd, "pooling ncd");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_depth, "pooling ksize_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_height, "pooling ksize_height");
+      PADDLE_ENFORCE_LE_INT_MAX(ksize_width, "pooling ksize_width");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_depth, "pooling stride_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_height, "pooling stride_height");
+      PADDLE_ENFORCE_LE_INT_MAX(stride_width, "pooling stride_width");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_depth, "pooling padding_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_height, "pooling padding_height");
+      PADDLE_ENFORCE_LE_INT_MAX(padding_width, "pooling padding_width");
+      auto pool_divmods_output =
+          FastDivModForPooling3D<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height),
+                                      static_cast<int>(output_depth));
       KernelMaxPool3DWithIdxGrad<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(ncd,
-                                                   output_grad_data,
-                                                   mask_data,
-                                                   input_channels,
-                                                   input_depth,
-                                                   input_height,
-                                                   input_width,
-                                                   output_depth,
-                                                   output_height,
-                                                   output_width,
-                                                   ksize_depth,
-                                                   ksize_height,
-                                                   ksize_width,
-                                                   stride_depth,
-                                                   stride_height,
-                                                   stride_width,
-                                                   padding_depth,
-                                                   padding_height,
-                                                   padding_width,
-                                                   adaptive,
-                                                   input_grad_data,
-                                                   pool_divmods_output);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(ncd),
+              output_grad_data,
+              mask_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_depth),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_depth),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(ksize_depth),
+              static_cast<int>(ksize_height),
+              static_cast<int>(ksize_width),
+              static_cast<int>(stride_depth),
+              static_cast<int>(stride_height),
+              static_cast<int>(stride_width),
+              static_cast<int>(padding_depth),
+              static_cast<int>(padding_height),
+              static_cast<int>(padding_width),
+              adaptive,
+              input_grad_data,
+              pool_divmods_output);
     } else {
       auto pool_divmods_output = FastDivModForPooling3D<int64_t>(
           input_channels, output_width, output_height, output_depth);
@@ -3101,9 +3349,9 @@ class FractionalMaxPool2dFunctor<GPUContext, T1, T2> {
 
     int64_t ncd = batch_size * input_channels * output_height;
 
-    int64_t thread_x = 32;
-    int64_t thread_y = 1;
-    int64_t thread_z = 1;
+    uint32_t thread_x = 32;
+    uint32_t thread_y = 1;
+    uint32_t thread_z = 1;
     dim3 threads(thread_x, thread_y, thread_z);
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t block_x = (output_width + threads.x - 1) / threads.x;
@@ -3111,7 +3359,12 @@ class FractionalMaxPool2dFunctor<GPUContext, T1, T2> {
                           ? max_grid_dim[1]
                           : (ncd + threads.y - 1) / threads.y;
     int64_t block_z = 1;
-    dim3 grid(block_x, block_y, block_z);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "pooling grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_y, "pooling grid.y");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_z, "pooling grid.z");
+    dim3 grid(static_cast<uint32_t>(block_x),
+              static_cast<uint32_t>(block_y),
+              static_cast<uint32_t>(block_z));
 
     uint64_t seed = 0;
     uint64_t offset = 0;
@@ -3123,24 +3376,35 @@ class FractionalMaxPool2dFunctor<GPUContext, T1, T2> {
     offset = seed_offset.second;
 
     if (input.numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods = FastDivModForPooling<int>(
-          input_channels, output_width, output_height);
+      PADDLE_ENFORCE_LE_INT_MAX(ncd, "pooling ncd");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_height, "pooling pool_height");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_width, "pooling pool_width");
+      auto pool_divmods =
+          FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                    static_cast<int>(output_width),
+                                    static_cast<int>(output_height));
       FractionalKernelMaxPool2d<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(ncd,
-                                                   input_data,
-                                                   input_channels,
-                                                   input_height,
-                                                   input_width,
-                                                   output_height,
-                                                   output_width,
-                                                   pool_height,
-                                                   pool_width,
-                                                   random_u,
-                                                   seed,
-                                                   offset,
-                                                   output_data,
-                                                   mask_data,
-                                                   pool_divmods);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(ncd),
+              input_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(pool_height),
+              static_cast<int>(pool_width),
+              random_u,
+              seed,
+              offset,
+              output_data,
+              mask_data,
+              pool_divmods);
     } else {
       auto pool_divmods = FastDivModForPooling<int64_t>(
           input_channels, output_width, output_height);
@@ -3193,9 +3457,9 @@ class FractionalMaxPool2dGradFunctor<GPUContext, T1, T2> {
 
     int64_t ncd = batch_size * input_channels * output_height;
 
-    int64_t thread_x = 32;
-    int64_t thread_y = 1;
-    int64_t thread_z = 1;
+    uint32_t thread_x = 32;
+    uint32_t thread_y = 1;
+    uint32_t thread_z = 1;
     dim3 threads(thread_x, thread_y, thread_z);
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t block_x = (output_width + threads.x - 1) / threads.x;
@@ -3203,7 +3467,12 @@ class FractionalMaxPool2dGradFunctor<GPUContext, T1, T2> {
                           ? max_grid_dim[1]
                           : (ncd + threads.y - 1) / threads.y;
     int64_t block_z = 1;
-    dim3 grid(block_x, block_y, block_z);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "pooling grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_y, "pooling grid.y");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_z, "pooling grid.z");
+    dim3 grid(static_cast<uint32_t>(block_x),
+              static_cast<uint32_t>(block_y),
+              static_cast<uint32_t>(block_z));
 
     uint64_t seed = 0;
     uint64_t offset = 0;
@@ -3215,24 +3484,35 @@ class FractionalMaxPool2dGradFunctor<GPUContext, T1, T2> {
     offset = seed_offset.second;
 
     if (input_grad->numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods = FastDivModForPooling<int>(
-          input_channels, output_width, output_height);
+      PADDLE_ENFORCE_LE_INT_MAX(ncd, "pooling ncd");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_height, "pooling pool_height");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_width, "pooling pool_width");
+      auto pool_divmods =
+          FastDivModForPooling<int>(static_cast<int>(input_channels),
+                                    static_cast<int>(output_width),
+                                    static_cast<int>(output_height));
       FractionalKernelMaxPool2dGrad<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(ncd,
-                                                   output_grad_data,
-                                                   mask_data,
-                                                   input_channels,
-                                                   input_height,
-                                                   input_width,
-                                                   output_height,
-                                                   output_width,
-                                                   pool_height,
-                                                   pool_width,
-                                                   random_u,
-                                                   seed,
-                                                   offset,
-                                                   input_grad_data,
-                                                   pool_divmods);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(ncd),
+              output_grad_data,
+              mask_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(pool_height),
+              static_cast<int>(pool_width),
+              random_u,
+              seed,
+              offset,
+              input_grad_data,
+              pool_divmods);
     } else {
       auto pool_divmods = FastDivModForPooling<int64_t>(
           input_channels, output_width, output_height);
@@ -3485,9 +3765,9 @@ class FractionalMaxPool3dFunctor<GPUContext, T1, T2> {
 
     int64_t ncd = batch_size * input_channels * output_depth;
 
-    int64_t thread_x = 32;
-    int64_t thread_y = 8;
-    int64_t thread_z = 1;
+    uint32_t thread_x = 32;
+    uint32_t thread_y = 8;
+    uint32_t thread_z = 1;
     dim3 threads(thread_x, thread_y, thread_z);
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t block_x = (output_width + threads.x - 1) / threads.x;
@@ -3497,7 +3777,12 @@ class FractionalMaxPool3dFunctor<GPUContext, T1, T2> {
     int64_t block_z = (ncd > max_grid_dim[2] * threads.z)
                           ? max_grid_dim[2]
                           : (ncd + threads.z - 1) / threads.z;
-    dim3 grid(block_x, block_y, block_z);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "pooling grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_y, "pooling grid.y");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_z, "pooling grid.z");
+    dim3 grid(static_cast<uint32_t>(block_x),
+              static_cast<uint32_t>(block_y),
+              static_cast<uint32_t>(block_z));
 
     uint64_t seed = 0;
     uint64_t offset = 0;
@@ -3509,27 +3794,42 @@ class FractionalMaxPool3dFunctor<GPUContext, T1, T2> {
     offset = seed_offset.second;
 
     if (input.numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods_output = FastDivModForPooling3D<int>(
-          input_channels, output_width, output_height, output_depth);
+      PADDLE_ENFORCE_LE_INT_MAX(ncd, "pooling ncd");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_depth, "pooling pool_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_height, "pooling pool_height");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_width, "pooling pool_width");
+      auto pool_divmods_output =
+          FastDivModForPooling3D<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height),
+                                      static_cast<int>(output_depth));
       FractionalKernelMaxPool3d<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(ncd,
-                                                   input_data,
-                                                   input_channels,
-                                                   input_depth,
-                                                   input_height,
-                                                   input_width,
-                                                   output_depth,
-                                                   output_height,
-                                                   output_width,
-                                                   pool_depth,
-                                                   pool_height,
-                                                   pool_width,
-                                                   random_u,
-                                                   seed,
-                                                   offset,
-                                                   output_data,
-                                                   mask_data,
-                                                   pool_divmods_output);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(ncd),
+              input_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_depth),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_depth),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(pool_depth),
+              static_cast<int>(pool_height),
+              static_cast<int>(pool_width),
+              random_u,
+              seed,
+              offset,
+              output_data,
+              mask_data,
+              pool_divmods_output);
     } else {
       auto pool_divmods_output = FastDivModForPooling3D<int64_t>(
           input_channels, output_width, output_height, output_depth);
@@ -3588,9 +3888,9 @@ class FractionalMaxPool3dGradFunctor<GPUContext, T1, T2> {
 
     int64_t ncd = batch_size * input_channels * output_depth;
 
-    int64_t thread_x = 32;
-    int64_t thread_y = 8;
-    int64_t thread_z = 1;
+    uint32_t thread_x = 32;
+    uint32_t thread_y = 8;
+    uint32_t thread_z = 1;
     dim3 threads(thread_x, thread_y, thread_z);
     std::array<unsigned int, 3> max_grid_dim = dev_ctx.GetCUDAMaxGridDimSize();
     int64_t block_x = (output_width + threads.x - 1) / threads.x;
@@ -3600,29 +3900,49 @@ class FractionalMaxPool3dGradFunctor<GPUContext, T1, T2> {
     int64_t block_z = (ncd > max_grid_dim[2] * threads.z)
                           ? max_grid_dim[2]
                           : (ncd + threads.z - 1) / threads.z;
-    dim3 grid(block_x, block_y, block_z);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "pooling grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_y, "pooling grid.y");
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_z, "pooling grid.z");
+    dim3 grid(static_cast<uint32_t>(block_x),
+              static_cast<uint32_t>(block_y),
+              static_cast<uint32_t>(block_z));
 
     if (input_grad->numel() <= std::numeric_limits<int>::max()) {
-      auto pool_divmods_output = FastDivModForPooling3D<int>(
-          input_channels, output_width, output_height, output_depth);
+      PADDLE_ENFORCE_LE_INT_MAX(ncd, "pooling ncd");
+      PADDLE_ENFORCE_LE_INT_MAX(input_channels, "pooling input_channels");
+      PADDLE_ENFORCE_LE_INT_MAX(input_depth, "pooling input_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(input_height, "pooling input_height");
+      PADDLE_ENFORCE_LE_INT_MAX(input_width, "pooling input_width");
+      PADDLE_ENFORCE_LE_INT_MAX(output_depth, "pooling output_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(output_height, "pooling output_height");
+      PADDLE_ENFORCE_LE_INT_MAX(output_width, "pooling output_width");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_depth, "pooling pool_depth");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_height, "pooling pool_height");
+      PADDLE_ENFORCE_LE_INT_MAX(pool_width, "pooling pool_width");
+      auto pool_divmods_output =
+          FastDivModForPooling3D<int>(static_cast<int>(input_channels),
+                                      static_cast<int>(output_width),
+                                      static_cast<int>(output_height),
+                                      static_cast<int>(output_depth));
 
       FractionalKernelMaxPool3dGrad<T1, T2, int>
-          <<<grid, threads, 0, dev_ctx.stream()>>>(ncd,
-                                                   output_grad_data,
-                                                   mask_data,
-                                                   input_channels,
-                                                   input_depth,
-                                                   input_height,
-                                                   input_width,
-                                                   output_depth,
-                                                   output_height,
-                                                   output_width,
-                                                   pool_depth,
-                                                   pool_height,
-                                                   pool_width,
-                                                   random_u,
-                                                   input_grad_data,
-                                                   pool_divmods_output);
+          <<<grid, threads, 0, dev_ctx.stream()>>>(
+              static_cast<int>(ncd),
+              output_grad_data,
+              mask_data,
+              static_cast<int>(input_channels),
+              static_cast<int>(input_depth),
+              static_cast<int>(input_height),
+              static_cast<int>(input_width),
+              static_cast<int>(output_depth),
+              static_cast<int>(output_height),
+              static_cast<int>(output_width),
+              static_cast<int>(pool_depth),
+              static_cast<int>(pool_height),
+              static_cast<int>(pool_width),
+              random_u,
+              input_grad_data,
+              pool_divmods_output);
     } else {
       auto pool_divmods_output = FastDivModForPooling3D<int64_t>(
           input_channels, output_width, output_height, output_depth);

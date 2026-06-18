@@ -15,6 +15,7 @@
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
 
 #include <limits>
+#include "paddle/common/enforce.h"
 #include "paddle/common/flags.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/core/kernel_registry.h"
@@ -210,10 +211,13 @@ void LaunchIndexPutKernel_V2(const Context& dev_ctx,
                     common::errors::PreconditionNotMet(
                         "the value of N should be in [0, "
                         "std::numeric_limits<int32_t>::max()]"));
-  constexpr int nt = 128;
+  constexpr uint32_t nt = 128;
   constexpr int vt = 4;
   const dim3 block(nt);
-  const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
+  int64_t grid64 = (N + static_cast<int64_t>(block.x) * vt - 1) /
+                   (static_cast<int64_t>(block.x) * vt);
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "index_put_kernel grid.x");
+  const dim3 grid(static_cast<uint32_t>(grid64));
   auto stream = dev_ctx.stream();
 
   auto* val_data = value.data<T>();

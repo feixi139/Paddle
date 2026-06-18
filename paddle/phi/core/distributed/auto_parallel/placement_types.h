@@ -101,7 +101,10 @@ class Shard : public Placement {
 
   virtual int get_co_shard_order() const { return 0; }
 
-  void set_split_factor(int64_t sf) { split_factor_ = sf; }
+  void set_split_factor(int64_t sf) {
+    PADDLE_ENFORCE_LE_INT_MAX(sf, "placement split factor");
+    split_factor_ = static_cast<int>(sf);
+  }
 
   int get_split_factor() const { return split_factor_; }
 
@@ -137,7 +140,16 @@ class Shard : public Placement {
 class CoShard : public Shard {
  public:
   CoShard(int64_t dim, int64_t co_shard_order)
-      : Shard(dim, 1), co_shard_order_(co_shard_order) {}
+      : Shard(
+            [&] {
+              PADDLE_ENFORCE_LE_INT_MAX(dim, "placement shard dim");
+              return static_cast<int>(dim);
+            }(),
+            1),
+        co_shard_order_([&] {
+          PADDLE_ENFORCE_LE_INT_MAX(co_shard_order, "placement co shard order");
+          return static_cast<int>(co_shard_order);
+        }()) {}
 
   int get_co_shard_order() const override { return co_shard_order_; }
 

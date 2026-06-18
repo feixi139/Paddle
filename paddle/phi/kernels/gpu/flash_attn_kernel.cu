@@ -110,6 +110,16 @@ void FlashAttnUnpaddedBaseKernel(const Context& dev_ctx,
   const int64_t head_size = dims[2];
   const int64_t num_heads_k = k.dims()[1];
   const int64_t total_q = dims[0];
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size, "flash_attn batch size");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads, "flash_attn num heads");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads_k, "flash_attn num heads k");
+  PADDLE_ENFORCE_LE_INT_MAX(head_size, "flash_attn head size");
+  PADDLE_ENFORCE_LE_INT_MAX(total_q, "flash_attn total q");
+  const int batch_size_i32 = static_cast<int>(batch_size);
+  const int num_heads_i32 = static_cast<int>(num_heads);
+  const int num_heads_k_i32 = static_cast<int>(num_heads_k);
+  const int head_size_i32 = static_cast<int>(head_size);
+  const int total_q_i32 = static_cast<int>(total_q);
 
   // TODO(umiswing): add shape check
 
@@ -119,12 +129,12 @@ void FlashAttnUnpaddedBaseKernel(const Context& dev_ctx,
   FlashAttnFwdParamsV2<T> params =
       FlashAttnFwdParamsV2<T>(dev_ctx,
                               /*version=*/2,
-                              batch_size,
+                              batch_size_i32,
                               max_seqlen_q,
                               max_seqlen_k,
-                              num_heads,
-                              num_heads_k,
-                              head_size,
+                              num_heads_i32,
+                              num_heads_k_i32,
+                              head_size_i32,
                               dropout,
                               scale,
                               causal,
@@ -139,7 +149,7 @@ void FlashAttnUnpaddedBaseKernel(const Context& dev_ctx,
                               softmax_lse,
                               seed_offset,
                               /*_unpadded_lse*/ true,
-                              /*_total_q*/ total_q);
+                              /*_total_q*/ total_q_i32);
 
   VLOG(10) << "FlashAttn fwd seed: " << params.seed
            << ", offset: " << params.offset;
@@ -376,6 +386,18 @@ void FlashAttnBaseKernel(const Context& dev_ctx,
   const int64_t seqlen_k = k.dims()[1];
   const int64_t num_heads_k = k.dims()[2];
   const int64_t head_size_v = v.dims()[3];
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size, "flash_attn batch size");
+  PADDLE_ENFORCE_LE_INT_MAX(seqlen_q, "flash_attn seqlen q");
+  PADDLE_ENFORCE_LE_INT_MAX(seqlen_k, "flash_attn seqlen k");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads, "flash_attn num heads");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads_k, "flash_attn num heads k");
+  PADDLE_ENFORCE_LE_INT_MAX(head_size, "flash_attn head size");
+  const int batch_size_i32 = static_cast<int>(batch_size);
+  const int seqlen_q_i32 = static_cast<int>(seqlen_q);
+  const int seqlen_k_i32 = static_cast<int>(seqlen_k);
+  const int num_heads_i32 = static_cast<int>(num_heads);
+  const int num_heads_k_i32 = static_cast<int>(num_heads_k);
+  const int head_size_i32 = static_cast<int>(head_size);
 
   PADDLE_ENFORCE_EQ(head_size,
                     head_size_v,
@@ -399,12 +421,12 @@ void FlashAttnBaseKernel(const Context& dev_ctx,
   FlashAttnFwdParamsV2<T> params =
       FlashAttnFwdParamsV2<T>(dev_ctx,
                               version,
-                              batch_size,
-                              seqlen_q,
-                              seqlen_k,
-                              num_heads,
-                              num_heads_k,
-                              head_size,
+                              batch_size_i32,
+                              seqlen_q_i32,
+                              seqlen_k_i32,
+                              num_heads_i32,
+                              num_heads_k_i32,
+                              head_size_i32,
                               dropout,
                               softmax_scale,
                               causal,

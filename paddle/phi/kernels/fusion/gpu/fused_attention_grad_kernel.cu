@@ -292,24 +292,43 @@ void FusedAttentionGradKernel(
   const auto input_x_dims = input_x->dims();
   const auto qkv_w_dims = qkv_weight_p->dims();
 
-  int batch_size = input_x_dims[0];
-  int max_seq_len = input_x_dims[1];
-  int dim_embed = input_x_dims[2];
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[0], "fused attention grad batch size");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[1],
+                            "fused attention grad max seq len");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[2], "fused attention grad dim embed");
+  int batch_size = static_cast<int>(input_x_dims[0]);
+  int max_seq_len = static_cast<int>(input_x_dims[1]);
+  int dim_embed = static_cast<int>(input_x_dims[2]);
   int num_head;
   int dim_head;
   int nranks = 1;
   if (!transpose_qkv_wb) {
-    num_head = qkv_w_dims[1];
-    dim_head = qkv_w_dims[2];
+    PADDLE_ENFORCE_LE_INT_MAX(qkv_w_dims[1], "fused attention grad num head");
+    PADDLE_ENFORCE_LE_INT_MAX(qkv_w_dims[2], "fused attention grad dim head");
+    num_head = static_cast<int>(qkv_w_dims[1]);
+    dim_head = static_cast<int>(qkv_w_dims[2]);
   } else {
-    nranks = (qkv_w_dims[0] * 3) / qkv_w_dims[1];
+    int64_t rank_count = (qkv_w_dims[0] * 3) / qkv_w_dims[1];
+    PADDLE_ENFORCE_LE_INT_MAX(rank_count, "fused attention grad nranks");
+    nranks = static_cast<int>(rank_count);
     num_head = num_heads;
-    dim_head = dim_embed / (num_head * nranks);
+    int64_t dim_head_dim =
+        dim_embed / (static_cast<int64_t>(num_head) * nranks);
+    PADDLE_ENFORCE_LE_INT_MAX(dim_head_dim, "fused attention grad dim head");
+    dim_head = static_cast<int>(dim_head_dim);
   }
 
-  int bsz_seq = batch_size * max_seq_len;
-  int hidden_size = num_head * dim_head;
-  int output_size = 3 * hidden_size;
+  int64_t bsz_seq = static_cast<int64_t>(batch_size) * max_seq_len;
+  PADDLE_ENFORCE_LE_INT_MAX(bsz_seq, "fused attention grad bsz_seq");
+  int bsz_seq_value = static_cast<int>(bsz_seq);
+  int64_t hidden_size_dim = static_cast<int64_t>(num_head) * dim_head;
+  int64_t output_size_dim = 3 * hidden_size_dim;
+  PADDLE_ENFORCE_LE_INT_MAX(hidden_size_dim,
+                            "fused attention grad hidden size");
+  PADDLE_ENFORCE_LE_INT_MAX(output_size_dim,
+                            "fused attention grad output size");
+  int hidden_size = static_cast<int>(hidden_size_dim);
+  int output_size = static_cast<int>(output_size_dim);
   int input_size = dim_embed;
 
   DenseTensor d_residual;
@@ -328,7 +347,7 @@ void FusedAttentionGradKernel(
   auto qkv_compute = fusion::AttnMatMul<T>(dev_ctx,
                                            transA,
                                            transB,
-                                           bsz_seq,
+                                           bsz_seq_value,
                                            output_size,
                                            input_size,
                                            compute_qkv_bias);
@@ -346,8 +365,13 @@ void FusedAttentionGradKernel(
   transB = false;
   bool compute_bias = false;
   // (b*s, num_head * dim_head) * (num_head * dim_head, dim_embed)
-  auto out_linear_compute = fusion::AttnMatMul<T>(
-      dev_ctx, transA, transB, bsz_seq, input_size, output_size, compute_bias);
+  auto out_linear_compute = fusion::AttnMatMul<T>(dev_ctx,
+                                                  transA,
+                                                  transB,
+                                                  bsz_seq_value,
+                                                  input_size,
+                                                  output_size,
+                                                  compute_bias);
   fusion::FusedDropoutLayerNormHelper<T, uint8_t>
       fused_dropout_layernorm_helper(
           dev_ctx, bsz_seq, dim_embed, dropout_param2, ln_epsilon);

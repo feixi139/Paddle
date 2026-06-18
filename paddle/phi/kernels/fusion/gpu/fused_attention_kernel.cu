@@ -217,21 +217,31 @@ void FusedAttentionKernel(const Context &dev_ctx,
   auto *final_out_data =
       dev_ctx.template Alloc<T>(out, out->numel() * sizeof(T));
 
-  int batch_size = input_x_dims[0];
-  int max_seq_len = input_x_dims[1];
-  int dim_embed = input_x_dims[2];
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[0], "fused attention batch size");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[1], "fused attention max seq len");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[2], "fused attention dim embed");
+  int batch_size = static_cast<int>(input_x_dims[0]);
+  int max_seq_len = static_cast<int>(input_x_dims[1]);
+  int dim_embed = static_cast<int>(input_x_dims[2]);
 
   int num_head;
   int dim_head;
   int nranks = 1;
   // get num_head and dim_head in two different ways
   if (!transpose_qkv_wb) {
-    num_head = qkv_w_dims[1];
-    dim_head = qkv_w_dims[2];
+    PADDLE_ENFORCE_LE_INT_MAX(qkv_w_dims[1], "fused attention num head");
+    PADDLE_ENFORCE_LE_INT_MAX(qkv_w_dims[2], "fused attention dim head");
+    num_head = static_cast<int>(qkv_w_dims[1]);
+    dim_head = static_cast<int>(qkv_w_dims[2]);
   } else {
-    nranks = (qkv_w_dims[0] * 3) / qkv_w_dims[1];
+    int64_t rank_count = (qkv_w_dims[0] * 3) / qkv_w_dims[1];
+    PADDLE_ENFORCE_LE_INT_MAX(rank_count, "fused attention nranks");
+    nranks = static_cast<int>(rank_count);
     num_head = num_heads;
-    dim_head = dim_embed / (num_head * nranks);
+    int64_t dim_head_dim =
+        dim_embed / (static_cast<int64_t>(num_head) * nranks);
+    PADDLE_ENFORCE_LE_INT_MAX(dim_head_dim, "fused attention dim head");
+    dim_head = static_cast<int>(dim_head_dim);
   }
 
   int64_t bsz_seq = static_cast<int64_t>(batch_size) * max_seq_len;

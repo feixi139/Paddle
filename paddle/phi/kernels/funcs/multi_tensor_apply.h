@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/common/place.h"
 #include "paddle/phi/core/tensor_utils.h"
@@ -119,19 +120,23 @@ void LaunchMultiTensorApplyKernel(
   auto stream = dev_ctx.stream();
   int block_id = 0;
   int tensor_id = 0;
-  for (int t = 0; t < tensors_size; t++) {
-    t_info.sizes[tensor_id] = input_vector[0][t]->numel();
+  for (size_t t = 0; t < tensors_size; t++) {
+    int64_t tensor_numel = input_vector[0][t]->numel();
+    PADDLE_ENFORCE_LE_INT_MAX(tensor_numel, "multi tensor apply numel");
+    t_info.sizes[tensor_id] = static_cast<int>(tensor_numel);
     t_info.grads[tensor_id] = grads[t]->data();
     for (int d = 0; d < InputNum - 1; d++) {
       t_info.tensor_addrs[d][tensor_id] = input_vector[d][t]->data();
     }
     tensor_id++;
-    int chunks_this_tensor =
-        (input_vector[0][t]->numel() + chunk_size - 1) / chunk_size;
+    int64_t chunks_this_tensor64 = (tensor_numel + chunk_size - 1) / chunk_size;
+    PADDLE_ENFORCE_LE_INT_MAX(chunks_this_tensor64,
+                              "multi tensor apply chunks");
+    int chunks_this_tensor = static_cast<int>(chunks_this_tensor64);
 
     constexpr auto kMaxChunkId = std::numeric_limits<uint16_t>::max();
     for (int chunk = 0; chunk < chunks_this_tensor; chunk++) {
-      t_info.tensor_ids[block_id] = tensor_id - 1;
+      t_info.tensor_ids[block_id] = static_cast<uint8_t>(tensor_id - 1);
       auto saved_chunk_id =
           (tensor_id == 1 ? chunk - t_info.start_chunk_id : chunk);
       PADDLE_ENFORCE_GE(saved_chunk_id,
@@ -145,7 +150,7 @@ void LaunchMultiTensorApplyKernel(
           errors::InvalidArgument(
               "The chunk id exceeds maximum value %d. This may be a bug.",
               kMaxChunkId));
-      t_info.chunk_ids[block_id] = saved_chunk_id;
+      t_info.chunk_ids[block_id] = static_cast<uint16_t>(saved_chunk_id);
       block_id++;
       bool reach_tensors_limit =
           (tensor_id == MaxTensorSize && chunk == chunks_this_tensor - 1);

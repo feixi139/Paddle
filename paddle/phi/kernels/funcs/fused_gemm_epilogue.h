@@ -67,8 +67,10 @@ namespace funcs {
 class GemmEpilogueAlgoCache {
  public:
   static GemmEpilogueAlgoCache& Instance() {
+    PADDLE_ENFORCE_LE_INT_MAX(FLAGS_cublaslt_exhaustive_search_times,
+                              "gemm epilogue exhaustive search times");
     static GemmEpilogueAlgoCache instance(
-        FLAGS_cublaslt_exhaustive_search_times);
+        static_cast<int>(FLAGS_cublaslt_exhaustive_search_times));
     return instance;
   }
 

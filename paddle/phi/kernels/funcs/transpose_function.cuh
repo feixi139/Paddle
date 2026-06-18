@@ -17,6 +17,7 @@ limitations under the License. */
 #include "paddle/phi/backends/gpu/gpu_launch_config.h"
 #include "paddle/phi/backends/gpu/gpu_primitives.h"
 #include "paddle/phi/backends/gpu/gpu_utils.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/tensor_utils.h"
 #include "paddle/phi/kernels/autotune/auto_tune_base.h"
 #include "paddle/phi/kernels/funcs/aligned_vector.h"
@@ -284,14 +285,19 @@ void LaunchNarrowDims2TransposeKernel(const GPUContext& d,
                                       const Dim3<IndexType>& input_dims,
                                       T* output) {
   constexpr int NumThreads = tile_long;
+  PADDLE_ENFORCE_LE_UINT32_MAX(total_tiles_count, "transpose grid.x");
   if (tile_size_i <= tile_long && tile_size_j <= tile_short) {
     TilingSwapDim1And2<T, NumThreads, tile_long, tile_short, IndexType>
-        <<<total_tiles_count, NumThreads, 0, d.stream()>>>(
-            input, input_dims, output);
+        <<<static_cast<uint32_t>(total_tiles_count),
+           NumThreads,
+           0,
+           d.stream()>>>(input, input_dims, output);
   } else {
     TilingSwapDim1And2<T, NumThreads, tile_short, tile_long, IndexType>
-        <<<total_tiles_count, NumThreads, 0, d.stream()>>>(
-            input, input_dims, output);
+        <<<static_cast<uint32_t>(total_tiles_count),
+           NumThreads,
+           0,
+           d.stream()>>>(input, input_dims, output);
   }
 }
 
@@ -519,8 +525,8 @@ void SwapDim1And2InNarrow(const GPUContext& d,
 
   NarrowDims2TransposeDispatch<ElemType, 32, 2, IndexType>::DoTranspose(
       d,
-      select_tile_size_i,
-      select_tile_size_j,
+      static_cast<int>(select_tile_size_i),
+      static_cast<int>(select_tile_size_j),
       total_tiles_count,
       reinterpret_cast<const ElemType*>(input),
       input_dims,
@@ -733,9 +739,12 @@ void SendSwapDim1And2InTranspose(const GPUContext& d,
     total_tiles_count *= input_dims_aligned[1];
     total_tiles_count *= input_dims_aligned[2];
 
+    PADDLE_ENFORCE_LE_UINT32_MAX(total_tiles_count, "transpose grid.x");
     TilingSwapDim1And2<T, kNumThreads, kTileSize, kTileSize, IndexType>
-        <<<total_tiles_count, kNumThreads, 0, d.stream()>>>(
-            input, input_dims, output);
+        <<<static_cast<uint32_t>(total_tiles_count),
+           kNumThreads,
+           0,
+           d.stream()>>>(input, input_dims, output);
 
   } else if (narrow_tile) {
     // If input shape is like Rect, such as 2X100, use Narrow tile size.
@@ -780,9 +789,9 @@ struct SwapDim0And2InTranspose {
                                   static_cast<IndexType>(combined_dims[1]),
                                   static_cast<IndexType>(combined_dims[2])};
 
-    IndexType total_size = combined_dims[0];
-    total_size *= combined_dims[1];
-    total_size *= combined_dims[2];
+    IndexType total_size = static_cast<IndexType>(combined_dims[0]);
+    total_size *= static_cast<IndexType>(combined_dims[1]);
+    total_size *= static_cast<IndexType>(combined_dims[2]);
     auto config = phi::backends::gpu::GetGpuLaunchConfig1D(d, total_size);
 
     TransposeSimpleKernel<T, 2, 1, 0, IndexType>
@@ -983,7 +992,7 @@ struct PermTypeClassifier {
   ~PermTypeClassifier() = default;
 
   int GetVecSize() const { return vec_size_; }
-  int GetRowsTile() const { return num_rows_tile_; }
+  int64_t GetRowsTile() const { return num_rows_tile_; }
   PermuteType GetPermType() const { return type_; }
 
  private:
@@ -1117,8 +1126,8 @@ struct PermuteParams {
     IndexT dst_dims[Rank];
     IndexT src_dims[Rank];
     for (auto i = 0; i < Rank; ++i) {
-      src_dims[i] = dims[i];
-      dst_dims[i] = dims[perm_[i]];
+      src_dims[i] = static_cast<IndexT>(dims[i]);
+      dst_dims[i] = static_cast<IndexT>(dims[perm_[i]]);
       perm[i] = perm_[i];
     }
     dst_index_helper = IdxAndOffsetHelper<IndexT, Rank>(dst_dims);
@@ -1434,15 +1443,20 @@ struct TransposeLauncher {
                   const T* src,
                   T* dst) {
     constexpr int ReadSize = sizeof(T) > sizeof(float) ? 1 : VecSize;
-    const IndexT cols = dims[rank - 1] / VecSize;
+    const IndexT cols = static_cast<IndexT>(dims[rank - 1] / VecSize);
     const IndexT n_cols_tile = GET_TILE_SIZE(cols, kTileSize);
 
     if (perm_type == PermuteType::kGeneralTranspose) {
-      IndexT chs = (rank == 2) ? 1 : dims[0];
-      IndexT rows = dims[rank - 2];
+      IndexT chs = (rank == 2) ? 1 : static_cast<IndexT>(dims[0]);
+      IndexT rows = static_cast<IndexT>(dims[rank - 2]);
       IndexT n_rows_tile = FindRowTiles(
           chs, rows, num_rows_tile, n_cols_tile, dev_ctx.GetSMCount());
-      dim3 blocks(n_cols_tile, n_rows_tile, chs);
+      PADDLE_ENFORCE_LE_UINT32_MAX(n_cols_tile, "transpose grid.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(n_rows_tile, "transpose grid.y");
+      PADDLE_ENFORCE_LE_UINT32_MAX(chs, "transpose grid.z");
+      dim3 blocks(static_cast<uint32_t>(n_cols_tile),
+                  static_cast<uint32_t>(n_rows_tile),
+                  static_cast<uint32_t>(chs));
       dim3 threads(kTileSize, kBlockRows, 1);
 
       if (is_vec_write) {
@@ -1455,11 +1469,16 @@ struct TransposeLauncher {
                 src, dst, n_rows_tile - 1, n_cols_tile - 1, cols, rows);
       }
     } else {
-      IndexT rows = dims[0];
-      IndexT chs = dims[rank - 2];
+      IndexT rows = static_cast<IndexT>(dims[0]);
+      IndexT chs = static_cast<IndexT>(dims[rank - 2]);
       IndexT n_rows_tile = FindRowTiles(
           chs, rows, num_rows_tile, n_cols_tile, dev_ctx.GetSMCount());
-      dim3 blocks(n_cols_tile, n_rows_tile, chs);
+      PADDLE_ENFORCE_LE_UINT32_MAX(n_cols_tile, "transpose grid.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(n_rows_tile, "transpose grid.y");
+      PADDLE_ENFORCE_LE_UINT32_MAX(chs, "transpose grid.z");
+      dim3 blocks(static_cast<uint32_t>(n_cols_tile),
+                  static_cast<uint32_t>(n_rows_tile),
+                  static_cast<uint32_t>(chs));
       dim3 threads(kTileSize, kBlockRows, 1);
 
       if (is_vec_write) {

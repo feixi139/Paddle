@@ -28,6 +28,7 @@ limitations under the License. */
 #endif
 
 #include "paddle/phi/backends/gpu/gpu_launch_config.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/funcs/aligned_vector.h"
 #include "paddle/phi/kernels/funcs/functors.h"
 #include "paddle/phi/kernels/funcs/layer_norm_impl.cu.h"
@@ -80,10 +81,14 @@ inline backends::gpu::GpuLaunchConfig Get1DBlocksAnd2DGrids(
     blocks_y = blocks_y >= 65536 ? 65535 : blocks_y;
   }
   backends::gpu::GpuLaunchConfig config;
+  PADDLE_ENFORCE_LE_UINT32_MAX(blocks_x, "fused dropout grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(blocks_y, "fused dropout grid.y");
+  PADDLE_ENFORCE_LE_UINT32_MAX(blocks_z, "fused dropout grid.z");
+  PADDLE_ENFORCE_LE_UINT32_MAX(threads, "fused dropout block.x");
   config.block_per_grid.x = static_cast<uint32_t>(blocks_x);
   config.block_per_grid.y = static_cast<uint32_t>(blocks_y);
   config.block_per_grid.z = static_cast<uint32_t>(blocks_z);
-  config.thread_per_block.x = threads;
+  config.thread_per_block.x = static_cast<uint32_t>(threads);
   return config;
 }
 

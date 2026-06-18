@@ -450,19 +450,28 @@ struct ReduceConfig {
     if (reduce_last_dim) {
       block_x = GetBlockDim(reduce_num);
       block_y = GetBlockDim(left_num);
-      block_dim->x = block_x;
-      block_dim->y = std::min(
+      PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "reduce any block.x");
+      block_dim->x = static_cast<uint32_t>(block_x);
+      int64_t block_y_limit = std::min(
           block_y, static_cast<int64_t>(max_num_threads / block_dim->x));
+      PADDLE_ENFORCE_LE_UINT32_MAX(block_y_limit, "reduce any block.y");
+      block_dim->y = static_cast<uint32_t>(block_y_limit);
       grid_x = details::CeilingDiv(left_num, block_dim->y);
       reduce_num_per_thread = details::CeilingDiv(reduce_num, block_dim->x);
     } else {
       block_x = GetBlockDim(left_num);
       block_y = GetBlockDim(reduce_num);
-      block_dim->x = std::min(block_x, static_cast<int64_t>(32));
-      block_dim->y = std::min(
+      int64_t block_x_limit = std::min(block_x, static_cast<int64_t>(32));
+      PADDLE_ENFORCE_LE_UINT32_MAX(block_x_limit, "reduce any block.x");
+      block_dim->x = static_cast<uint32_t>(block_x_limit);
+      int64_t block_y_limit = std::min(
           block_y, static_cast<int64_t>(max_num_threads / block_dim->x));
-      block_dim->x = std::min(
+      PADDLE_ENFORCE_LE_UINT32_MAX(block_y_limit, "reduce any block.y");
+      block_dim->y = static_cast<uint32_t>(block_y_limit);
+      block_x_limit = std::min(
           block_x, static_cast<int64_t>(max_num_threads / block_dim->y));
+      PADDLE_ENFORCE_LE_UINT32_MAX(block_x_limit, "reduce any block.x");
+      block_dim->x = static_cast<uint32_t>(block_x_limit);
       grid_x = details::CeilingDiv(left_num, block_dim->x);
       reduce_num_per_thread = details::CeilingDiv(reduce_num, block_dim->y);
     }
@@ -493,8 +502,14 @@ struct ReduceConfig {
     int64_t grid_y = std::max(std::min(input_split_num_1, input_split_num_3),
                               input_split_num_2);
 
-    grid_dim->x = std::min(grid_x, static_cast<int64_t>(max_grid_dim[0]));
-    grid_dim->y = std::min(grid_y, static_cast<int64_t>(max_grid_dim[1]));
+    int64_t grid_x_limit =
+        std::min(grid_x, static_cast<int64_t>(max_grid_dim[0]));
+    int64_t grid_y_limit =
+        std::min(grid_y, static_cast<int64_t>(max_grid_dim[1]));
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_x_limit, "reduce any grid.x");
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_y_limit, "reduce any grid.y");
+    grid_dim->x = static_cast<uint32_t>(grid_x_limit);
+    grid_dim->y = static_cast<uint32_t>(grid_y_limit);
     // if grid.y > 1, we need launch reduce kernel again.
     if (grid_dim->y > 1) {
       should_reduce_again = true;
@@ -510,15 +525,20 @@ struct ReduceConfig {
     // Update left_num
     int64_t grid_z = left_num / last_dim_num;
     left_num = last_dim_num;
-    grid_dim->z = grid_z;
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_z, "reduce higher grid.z");
+    grid_dim->z = static_cast<uint32_t>(grid_z);
 
     // Set gridDim.x and blockDim.x
     int device_id = phi::backends::gpu::GetCurrentDeviceId();
     std::array<uint32_t, 3> max_grid_dim =
         phi::backends::gpu::GetGpuMaxGridDimSize(device_id);
-    block_dim->x = GetBlockDim(left_num);
-    grid_dim->x = std::min(details::CeilingDiv(left_num, block_dim->x),
-                           static_cast<int64_t>(max_grid_dim[0]));
+    int64_t block_x = GetBlockDim(left_num);
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_x, "reduce higher block.x");
+    block_dim->x = static_cast<uint32_t>(block_x);
+    int64_t grid_x = std::min(details::CeilingDiv(left_num, block_dim->x),
+                              static_cast<int64_t>(max_grid_dim[0]));
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_x, "reduce higher grid.x");
+    grid_dim->x = static_cast<uint32_t>(grid_x);
 
     int max_mp = phi::backends::gpu::GetGPUMultiProcessors(device_id);
     int max_threads_per_mp =
@@ -537,7 +557,9 @@ struct ReduceConfig {
         blocking_size *= 2;
       }
       should_reduce_again = true;
-      grid_dim->y = details::CeilingDiv(reduce_num, blocking_size);
+      int64_t grid_y = details::CeilingDiv(reduce_num, blocking_size);
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid_y, "reduce higher grid.y");
+      grid_dim->y = static_cast<uint32_t>(grid_y);
     }
   }
 #endif

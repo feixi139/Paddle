@@ -21,6 +21,7 @@ limitations under the License. */
 #include <hiprand_kernel.h>
 #endif
 
+#include "paddle/common/enforce.h"
 #include "paddle/common/hostdevice.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/backends/gpu/gpu_info.h"
@@ -353,8 +354,13 @@ void distribution_and_transform(const GPUContext &dev_ctx,
   uint64_t seed = seed_offset.first;
   uint64_t offset = seed_offset.second;
 
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_size, "distribution kernel grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(block_size, "distribution kernel block.x");
+  uint32_t grid = static_cast<uint32_t>(grid_size);
+  uint32_t block = static_cast<uint32_t>(block_size);
+
   DistributionKernel<T, DistOp, TransformOp>
-      <<<grid_size, block_size, 0, dev_ctx.stream()>>>(
+      <<<grid, block, 0, dev_ctx.stream()>>>(
           size, seed, offset, dist, trans, out_data, total_thread);
 }
 

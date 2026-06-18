@@ -16,6 +16,7 @@
 
 #include "glog/logging.h"
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/core/tensor_utils.h"
@@ -209,7 +210,13 @@ void TopkKernel(const Context& dev_ctx,
     // NOTE: pass lds and dim same to input width.
     // NOTE: old matrix implementation of stride is different to eigen.
     const int kMaxHeight = 2048;
-    int gridx = input_height < kMaxHeight ? input_height : kMaxHeight;
+    int64_t gridx64 = input_height < kMaxHeight ? input_height : kMaxHeight;
+    PADDLE_ENFORCE_LE_UINT32_MAX(gridx64, "KeMatrixTopK grid.x");
+    PADDLE_ENFORCE_LE_INT_MAX(gridx64, "KeMatrixTopK grid_dim");
+    PADDLE_ENFORCE_LE_INT_MAX(k, "KeMatrixTopK k");
+    uint32_t gridx = static_cast<uint32_t>(gridx64);
+    int gridx_int = static_cast<int>(gridx64);
+    int k_int = static_cast<int>(k);
     auto config = backends::gpu::GetGpuLaunchConfig1D(dev_ctx, input_width);
 #ifdef PADDLE_WITH_HIP
     if (config.thread_per_block.x < WARP_SIZE) {
@@ -218,30 +225,29 @@ void TopkKernel(const Context& dev_ctx,
 #endif
     switch (config.thread_per_block.x) {
 #ifdef PADDLE_WITH_HIP
-      FIXED_BLOCK_DIM(
-          funcs::KeMatrixTopK<T, 20, kBlockDim>
-          <<<gridx, kBlockDim, 0, dev_ctx.stream()>>>(output_data,
-                                                      k,
-                                                      indices_data,
-                                                      input_data,
-                                                      input_width,
-                                                      input_width,
-                                                      static_cast<int>(k),
-                                                      gridx,
-                                                      input_height,
-                                                      largest));
+      FIXED_BLOCK_DIM(funcs::KeMatrixTopK<T, 20, kBlockDim>
+                      <<<gridx, kBlockDim, 0, dev_ctx.stream()>>>(output_data,
+                                                                  k_int,
+                                                                  indices_data,
+                                                                  input_data,
+                                                                  input_width,
+                                                                  input_width,
+                                                                  k_int,
+                                                                  gridx_int,
+                                                                  input_height,
+                                                                  largest));
 #else
-      FIXED_BLOCK_DIM(switch (funcs::getMaxLength(k)) {
+      FIXED_BLOCK_DIM(switch (funcs::getMaxLength(k_int)) {
         FIXED_MAXLENGTH(
             funcs::KeMatrixTopK<T, maxLength, kBlockDim>
             <<<gridx, kBlockDim, 0, dev_ctx.stream()>>>(output_data,
-                                                        k,
+                                                        k_int,
                                                         indices_data,
                                                         input_data,
                                                         input_width,
                                                         input_width,
-                                                        static_cast<int>(k),
-                                                        gridx,
+                                                        k_int,
+                                                        gridx_int,
                                                         input_height,
                                                         largest));
         default:
@@ -322,7 +328,13 @@ void TopkKernel(const Context& dev_ctx,
     }
 
     const int kMaxHeight = 2048;
-    int gridx = input_height < kMaxHeight ? input_height : kMaxHeight;
+    int64_t gridx64 = input_height < kMaxHeight ? input_height : kMaxHeight;
+    PADDLE_ENFORCE_LE_UINT32_MAX(gridx64, "KeMatrixTopK grid.x");
+    PADDLE_ENFORCE_LE_INT_MAX(gridx64, "KeMatrixTopK grid_dim");
+    PADDLE_ENFORCE_LE_INT_MAX(k, "KeMatrixTopK k");
+    uint32_t gridx = static_cast<uint32_t>(gridx64);
+    int gridx_int = static_cast<int>(gridx64);
+    int k_int = static_cast<int>(k);
     auto config = backends::gpu::GetGpuLaunchConfig1D(dev_ctx, input_width);
 #ifdef PADDLE_WITH_HIP
     if (config.thread_per_block.x < WARP_SIZE) {
@@ -334,27 +346,27 @@ void TopkKernel(const Context& dev_ctx,
       FIXED_BLOCK_DIM(
           funcs::KeMatrixTopK<T, 20, kBlockDim>
           <<<gridx, kBlockDim, 0, dev_ctx.stream()>>>(trans_out.data<T>(),
-                                                      k,
+                                                      k_int,
                                                       trans_ind.data<int64_t>(),
                                                       trans_input.data<T>(),
                                                       input_width,
                                                       input_width,
-                                                      static_cast<int>(k),
-                                                      gridx,
+                                                      k_int,
+                                                      gridx_int,
                                                       input_height,
                                                       largest));
 #else
-      FIXED_BLOCK_DIM(switch (funcs::getMaxLength(k)) {
+      FIXED_BLOCK_DIM(switch (funcs::getMaxLength(k_int)) {
         FIXED_MAXLENGTH(funcs::KeMatrixTopK<T, maxLength, kBlockDim>
                         <<<gridx, kBlockDim, 0, dev_ctx.stream()>>>(
                             trans_out.data<T>(),
-                            k,
+                            k_int,
                             trans_ind.data<int64_t>(),
                             trans_input.data<T>(),
                             input_width,
                             input_width,
-                            static_cast<int>(k),
-                            gridx,
+                            k_int,
+                            gridx_int,
                             input_height,
                             largest));
         default:

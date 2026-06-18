@@ -112,14 +112,31 @@ void BatchTranspose(T* output,
         "Unsupported input size, batch: %ld,m: %ld, n: %ld", batch, m, n));
   }
 
-  dim3 logical_grid((n + 31) / 32, (m + 31) / 32, batch);
+  int64_t logical_grid_x = (n + 31) / 32;
+  int64_t logical_grid_y = (m + 31) / 32;
+  int64_t logical_grid_z = batch;
+  PADDLE_ENFORCE_LE_UINT32_MAX(logical_grid_x, "batch transpose grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(logical_grid_y, "batch transpose grid.y");
+  PADDLE_ENFORCE_LE_UINT32_MAX(logical_grid_z, "batch transpose grid.z");
+  dim3 logical_grid(static_cast<uint32_t>(logical_grid_x),
+                    static_cast<uint32_t>(logical_grid_y),
+                    static_cast<uint32_t>(logical_grid_z));
   dim3 block(32, 8);
   // we set swizzle to 2 default.
-  int swizzle = (logical_grid.y + max_grid_y - 1) / max_grid_y;
-  swizzle = std::max(swizzle, 2);
-  dim3 physical_grid(logical_grid.x * swizzle,
-                     (logical_grid.y + swizzle - 1) / swizzle,
-                     batch);
+  int64_t swizzle64 = (logical_grid_y + max_grid_y - 1) / max_grid_y;
+  swizzle64 = std::max(swizzle64, int64_t{2});
+  PADDLE_ENFORCE_LE_INT_MAX(swizzle64, "batch transpose swizzle");
+  int swizzle = static_cast<int>(swizzle64);
+  uint64_t physical_grid_x = static_cast<uint64_t>(logical_grid.x) * swizzle;
+  uint64_t physical_grid_y =
+      (static_cast<uint64_t>(logical_grid.y) + swizzle - 1) / swizzle;
+  PADDLE_ENFORCE_LE_UINT32_MAX(physical_grid_x,
+                               "batch transpose physical grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(physical_grid_y,
+                               "batch transpose physical grid.y");
+  dim3 physical_grid(static_cast<uint32_t>(physical_grid_x),
+                     static_cast<uint32_t>(physical_grid_y),
+                     logical_grid.z);
   batch_transpose_kernel<<<physical_grid, block>>>(
       output, input, batch, m, n, swizzle);
 }

@@ -109,8 +109,9 @@ __forceinline__ __device__ U BlockReduceSum(U val, U *shared) {
     for (int64_t i = 0; i < std::ceil(feature_size / (1.0 * kMaxBlockNum)); \
          i++) {                                                             \
       int64_t col_offset = i * static_cast<int64_t>(kMaxBlockNum);          \
-      int block_num = static_cast<int>(std::min(                            \
-          feature_size - col_offset, static_cast<int64_t>(kMaxBlockNum)));  \
+      int64_t block_num = std::min(feature_size - col_offset,               \
+                                   static_cast<int64_t>(kMaxBlockNum));     \
+      PADDLE_ENFORCE_LE_UINT32_MAX(block_num, "layer_norm grid.x");         \
       constexpr auto kBlockDim = (1 << (log2_block_dim));                   \
       __VA_ARGS__;                                                          \
     }                                                                       \
@@ -820,6 +821,9 @@ void ln_bwd_fast_kernel_driver(const GPUContext &dev_ctx,
                                T *d_dropout_src_ptr = nullptr) {
   auto stream = dev_ctx.stream();
   if (cols == 1024 || cols == 384 || cols == 256) {
+    PADDLE_ENFORCE_LE_INT_MAX(rows, "layer_norm fast rows");
+    PADDLE_ENFORCE_LE_INT_MAX(cols, "layer_norm fast cols");
+    const int row_count = static_cast<int>(rows);
     // step-1: compute dx and reduced part results of dscale and dbias.
     const int WARPS_M = 4;  // how many rows deal in a cta.
     const int WARPS_N = 1;  // how many warps to deal with a row.
@@ -832,7 +836,7 @@ void ln_bwd_fast_kernel_driver(const GPUContext &dev_ctx,
     const int ROWS_PER_CTA = WARPS_M;
 
     // 4 * 1024 * 4
-    const int SMEM_BYTES = ROWS_PER_CTA * cols * sizeof(U);
+    const int SMEM_BYTES = static_cast<int>(ROWS_PER_CTA * cols * sizeof(U));
 
     // #blocks = 2 * #SM
     const int gridx = 2 * dev_ctx.GetSMCount();
@@ -866,7 +870,7 @@ void ln_bwd_fast_kernel_driver(const GPUContext &dev_ctx,
                            WARPS_N,                                 \
                            BYTES_PER_LDG,                           \
                            ele_per_row>                             \
-      <<<gridx, THREADS_PER_CTA, 0, stream>>>(rows,                 \
+      <<<gridx, THREADS_PER_CTA, 0, stream>>>(row_count,            \
                                               epsilon,              \
                                               x_ptr,                \
                                               scale_ptr,            \
@@ -908,7 +912,7 @@ void ln_bwd_fast_kernel_driver(const GPUContext &dev_ctx,
                            WARPS_N,                            \
                            BYTES_PER_LDG,                      \
                            ele_per_row>                        \
-      <<<gridx, THREADS_PER_CTA, 0, stream>>>(rows,            \
+      <<<gridx, THREADS_PER_CTA, 0, stream>>>(row_count,       \
                                               epsilon,         \
                                               x_ptr,           \
                                               scale_ptr,       \
@@ -1510,7 +1514,7 @@ __global__ void LayerNormBackwardGradientScaleOrBias(
     float epsilon,
     int64_t batch_size,
     int64_t feature_size,
-    int col_offset) {
+    int64_t col_offset) {
   using ScaleBiasT = LayerNormScaleBiasT<T, U, ScaleBiasWithSameTypeX>;
   using BlockReduce = cub::BlockReduce<U, BlockDim>;
   __shared__ typename BlockReduce::TempStorage temp_storage;
@@ -1732,31 +1736,26 @@ static void LayerNormBackward(
   auto stream = dev_ctx.stream();
   const int kMaxBlockDim = 512;
   const int kMaxBlockNum = 128;
-  // TODO(large-tensor): generic backward kernel launch uses int32 grid dim
-  PADDLE_ENFORCE_LE_INT_MAX(batch_size, "batch_size");
+  PADDLE_ENFORCE_LE_UINT32_MAX(batch_size, "layer_norm grid.x");
   int gradient_flag = ((d_x != nullptr ? 1 : 0) << 2) |
                       ((d_scale != nullptr ? 1 : 0) << 1) |
                       ((d_bias != nullptr ? 1 : 0));
   if (gradient_flag == 0) return;
   if (batch_size == 1) {
-    // TODO(large-tensor): batch_size==1 path uses int32 grid dim
-    PADDLE_ENFORCE_LE_INT_MAX(
-        (feature_size + kMaxBlockDim - 1) / kMaxBlockDim,
-        "(feature_size + kMaxBlockDim - 1) / kMaxBlockDim");
+    int64_t grid_x = (feature_size + kMaxBlockDim - 1) / kMaxBlockDim;
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_x, "layer_norm batch_one grid.x");
     LayerNormBackwardWhenBatchSizeIsOne<T, U, ScaleBiasWithSameTypeX>
-        <<<(feature_size + kMaxBlockDim - 1) / kMaxBlockDim,
-           kMaxBlockDim,
-           0,
-           stream>>>(x,
-                     d_y,
-                     d_x,
-                     d_scale,
-                     d_bias,
-                     mean,
-                     var,
-                     scale,
-                     epsilon,
-                     feature_size);
+        <<<static_cast<uint32_t>(grid_x), kMaxBlockDim, 0, stream>>>(
+            x,
+            d_y,
+            d_x,
+            d_scale,
+            d_bias,
+            mean,
+            var,
+            scale,
+            epsilon,
+            feature_size);
 
     if (d_x != nullptr) {
       switch (GetDesiredBlockDim(feature_size)) {
@@ -1782,18 +1781,19 @@ static void LayerNormBackward(
                                                  false,
                                                  false,
                                                  ScaleBiasWithSameTypeX>
-            <<<block_num, kBlockDim, 0, stream>>>(x,
-                                                  d_y,
-                                                  d_scale,
-                                                  d_bias,
-                                                  d_x,
-                                                  mean,
-                                                  var,
-                                                  scale,
-                                                  epsilon,
-                                                  batch_size,
-                                                  feature_size,
-                                                  col_offset));
+            <<<static_cast<uint32_t>(block_num), kBlockDim, 0, stream>>>(
+                x,
+                d_y,
+                d_scale,
+                d_bias,
+                d_x,
+                mean,
+                var,
+                scale,
+                epsilon,
+                batch_size,
+                feature_size,
+                col_offset));
       }
       break;
     case 2:  // d_x == nullptr, d_scale != nullptr, d_bias == nullptr
@@ -1807,18 +1807,19 @@ static void LayerNormBackward(
                                                  false,
                                                  true,
                                                  ScaleBiasWithSameTypeX>
-            <<<block_num, kBlockDim, 0, stream>>>(x,
-                                                  d_y,
-                                                  d_scale,
-                                                  d_bias,
-                                                  d_x,
-                                                  mean,
-                                                  var,
-                                                  scale,
-                                                  epsilon,
-                                                  batch_size,
-                                                  feature_size,
-                                                  col_offset));
+            <<<static_cast<uint32_t>(block_num), kBlockDim, 0, stream>>>(
+                x,
+                d_y,
+                d_scale,
+                d_bias,
+                d_x,
+                mean,
+                var,
+                scale,
+                epsilon,
+                batch_size,
+                feature_size,
+                col_offset));
       }
       break;
     case 3:  // d_x == nullptr, d_scale != nulptr, d_bias != nullptr
@@ -1831,18 +1832,19 @@ static void LayerNormBackward(
                                          kBlockDim,
                                          false,
                                          ScaleBiasWithSameTypeX>
-            <<<block_num, kBlockDim, 0, stream>>>(x,
-                                                  d_y,
-                                                  d_scale,
-                                                  d_bias,
-                                                  d_x,
-                                                  mean,
-                                                  var,
-                                                  scale,
-                                                  epsilon,
-                                                  batch_size,
-                                                  feature_size,
-                                                  col_offset));
+            <<<static_cast<uint32_t>(block_num), kBlockDim, 0, stream>>>(
+                x,
+                d_y,
+                d_scale,
+                d_bias,
+                d_x,
+                mean,
+                var,
+                scale,
+                epsilon,
+                batch_size,
+                feature_size,
+                col_offset));
       }
       break;
     case 4:  // d_x != nullptr, d_scale == nullptr, d_bias == nullptr
@@ -1852,7 +1854,7 @@ static void LayerNormBackward(
                                             U,
                                             kBlockDim,
                                             ScaleBiasWithSameTypeX>
-            <<<batch_size, kBlockDim, 0, stream>>>(
+            <<<static_cast<uint32_t>(batch_size), kBlockDim, 0, stream>>>(
                 x, d_y, d_x, mean, var, scale, epsilon, feature_size));
       }
       break;
@@ -1867,23 +1869,24 @@ static void LayerNormBackward(
                                                  true,
                                                  false,
                                                  ScaleBiasWithSameTypeX>
-            <<<block_num, kBlockDim, 0, stream>>>(x,
-                                                  d_y,
-                                                  d_scale,
-                                                  d_bias,
-                                                  d_x,
-                                                  mean,
-                                                  var,
-                                                  scale,
-                                                  epsilon,
-                                                  batch_size,
-                                                  feature_size,
-                                                  col_offset));
+            <<<static_cast<uint32_t>(block_num), kBlockDim, 0, stream>>>(
+                x,
+                d_y,
+                d_scale,
+                d_bias,
+                d_x,
+                mean,
+                var,
+                scale,
+                epsilon,
+                batch_size,
+                feature_size,
+                col_offset));
       }
       switch (GetDesiredBlockDim(feature_size)) {
         FIXED_BLOCK_DIM_CASE(
             LayerNormBackwardPostProcessToCalculateDX<T, U, kBlockDim>
-            <<<batch_size, kBlockDim, 0, stream>>>(
+            <<<static_cast<uint32_t>(batch_size), kBlockDim, 0, stream>>>(
                 x, d_x, mean, var, epsilon, feature_size));
       }
       break;
@@ -1898,23 +1901,24 @@ static void LayerNormBackward(
                                                  true,
                                                  true,
                                                  ScaleBiasWithSameTypeX>
-            <<<block_num, kBlockDim, 0, stream>>>(x,
-                                                  d_y,
-                                                  d_scale,
-                                                  d_bias,
-                                                  d_x,
-                                                  mean,
-                                                  var,
-                                                  scale,
-                                                  epsilon,
-                                                  batch_size,
-                                                  feature_size,
-                                                  col_offset));
+            <<<static_cast<uint32_t>(block_num), kBlockDim, 0, stream>>>(
+                x,
+                d_y,
+                d_scale,
+                d_bias,
+                d_x,
+                mean,
+                var,
+                scale,
+                epsilon,
+                batch_size,
+                feature_size,
+                col_offset));
       }
       switch (GetDesiredBlockDim(feature_size)) {
         FIXED_BLOCK_DIM_CASE(
             LayerNormBackwardPostProcessToCalculateDX<T, U, kBlockDim>
-            <<<batch_size, kBlockDim, 0, stream>>>(
+            <<<static_cast<uint32_t>(batch_size), kBlockDim, 0, stream>>>(
                 x, d_x, mean, var, epsilon, feature_size));
       }
       break;
@@ -1955,7 +1959,9 @@ static void LayerNormBackward(
         constexpr int BDIMY1 = 4;
         constexpr int PartSize = BDIMY1 * VPT;
         dim3 threads2(BDIMX, BDIMY1, 1);
-        dim3 blocks2((feature_size + BDIMX - 1) / BDIMX, PartSize, 1);
+        int64_t blocks2_x = (feature_size + BDIMX - 1) / BDIMX;
+        PADDLE_ENFORCE_LE_UINT32_MAX(blocks2_x, "layer_norm part grad grid.x");
+        dim3 blocks2(static_cast<uint32_t>(blocks2_x), PartSize, 1);
 
         int64_t param_num = PartSize * feature_size;
         auto part_grad_param_ptr = phi::memory_utils::Alloc(
@@ -1979,7 +1985,9 @@ static void LayerNormBackward(
 
         constexpr int BDIMY2 = 8;
         dim3 threads3(BDIMX, BDIMY2, 1);
-        const dim3 blocks3((feature_size + BDIMX - 1) / BDIMX, 1, 1);
+        int64_t blocks3_x = (feature_size + BDIMX - 1) / BDIMX;
+        PADDLE_ENFORCE_LE_UINT32_MAX(blocks3_x, "layer_norm sum grad grid.x");
+        const dim3 blocks3(static_cast<uint32_t>(blocks3_x), 1, 1);
         LayerNormBackwardSumGradGammaBeta<T, U, BDIMX, BDIMY2, ScaleT>
             <<<blocks3, threads3, 0, stream>>>(part_grad_gamma,
                                                part_grad_beta,
@@ -1994,30 +2002,43 @@ static void LayerNormBackward(
                         reinterpret_cast<uint64_t>(d_x);
         int vec_size =
             std::min(4, phi::GetVectorizedSize<T>(reinterpret_cast<T *>(addr)));
-        int real_vec = VecSizeJudgeForeGradInput(feature_size, vec_size);
+        PADDLE_ENFORCE_LE_INT_MAX(feature_size, "layer_norm feature size");
+        int real_vec =
+            VecSizeJudgeForeGradInput(static_cast<int>(feature_size), vec_size);
 
         if (feature_size <= 2048) {
           // One thread must work with at least real_vec quantity data, at most
           // 8 data.
           int data_per_warp = BDIMX * real_vec;
-          uint32_t warp_num =
+          int64_t warp_num =
               feature_size < data_per_warp ? 1 : (feature_size / data_per_warp);
+          PADDLE_ENFORCE_LE_UINT32_MAX(warp_num, "layer_norm warp num");
+          uint32_t warp_count = static_cast<uint32_t>(warp_num);
 #if defined(__clang__) || defined(__GNUC__)
-          int block_dim_y = std::min(8, 1 << (31 - __builtin_clz(warp_num)));
+          int block_dim_y = std::min(8, 1 << (31 - __builtin_clz(warp_count)));
 #else
         int block_dim_y = 1;
-        while (warp_num != 0) {
-          warp_num = warp_num >> 1;
+        while (warp_count != 0) {
+          warp_count = warp_count >> 1;
           block_dim_y <<= 1;
         }
         block_dim_y = std::min(8, (block_dim_y / 2));
 #endif  // __GNUCC__
 
           dim3 threads1(BDIMX, block_dim_y, 1);
+          PADDLE_ENFORCE_LE_INT_MAX(feature_size, "layer_norm feature size");
+          uint32_t grid_x = static_cast<uint32_t>(batch_size);
 #define IMPL_BACKWARD_FOR_INPUT(num)                                       \
   LayerNormBackwardComputeGradInputWithSmallFeatureSize<T, U, ScaleT, num> \
-      <<<batch_size, threads1, 0, stream>>>(                               \
-          d_y, x, batch_size, feature_size, mean, var, epsilon, scale, d_x);
+      <<<grid_x, threads1, 0, stream>>>(d_y,                               \
+                                        x,                                 \
+                                        static_cast<int>(batch_size),      \
+                                        static_cast<int>(feature_size),    \
+                                        mean,                              \
+                                        var,                               \
+                                        epsilon,                           \
+                                        scale,                             \
+                                        d_x);
 
           switch (real_vec) {
             case 4: {
@@ -2035,16 +2056,19 @@ static void LayerNormBackward(
         } else {
           constexpr int BDIMY3 = 4;
           dim3 threads1(BDIMX, BDIMY3, 1);
+          PADDLE_ENFORCE_LE_UINT32_MAX(batch_size,
+                                       "layer_norm grad input grid.x");
           LayerNormBackwardComputeGradInput<T, U, BDIMX, BDIMY3, ScaleT>
-              <<<batch_size, threads1, 0, stream>>>(d_y,
-                                                    x,
-                                                    batch_size,
-                                                    feature_size,
-                                                    mean,
-                                                    var,
-                                                    epsilon,
-                                                    scale,
-                                                    d_x);
+              <<<static_cast<uint32_t>(batch_size), threads1, 0, stream>>>(
+                  d_y,
+                  x,
+                  batch_size,
+                  feature_size,
+                  mean,
+                  var,
+                  epsilon,
+                  scale,
+                  d_x);
         }
 #ifdef PADDLE_WITH_CUDA
       }

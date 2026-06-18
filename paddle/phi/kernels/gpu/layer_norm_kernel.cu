@@ -433,7 +433,7 @@ void LaunchLayerNormKernel(const Context& dev_ctx,
             mean_data,                                                         \
             var_data,                                                          \
             static_cast<const U>(epsilon),                                     \
-            rows,                                                              \
+            static_cast<index_t>(rows),                                        \
             cols,                                                              \
             cols_per_thread,                                                   \
             valid_scale,                                                       \

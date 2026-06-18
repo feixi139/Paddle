@@ -151,9 +151,11 @@ static void kvReduceForGQA(const Context& dev_ctx,
       1,
       common::errors::InvalidArgument("headdim dimension must be contiguous"));
   const int64_t reduceDimSize = dk_tmp.dims()[2];
-  const size_t blockNum =
+  const size_t blockNum64 =
       std::min((static_cast<int64_t>(dk_tmp.dims()[0] + 31) / 32),
                static_cast<int64_t>(1024l));
+  PADDLE_ENFORCE_LE_UINT32_MAX(blockNum64, "flash_attn gqa reduce grid.x");
+  const uint32_t blockNum = static_cast<uint32_t>(blockNum64);
   const dim3 threadNum{32, 4, 1};
   auto sumkernel = selectSumkernel<T>(dk_tmp.dims()[3]);
   sumkernel<<<blockNum, threadNum, 0, dev_ctx.stream()>>>(
@@ -193,9 +195,11 @@ static void kvReduceBatchedForGQA(const Context& dev_ctx,
                     common::errors::InvalidArgument(
                         "batchsize dimension must be contiguous"));
   const int64_t reduceDimSize = dk_tmp.dims()[3];
-  const size_t blockNum = std::min(
+  const size_t blockNum64 = std::min(
       (static_cast<int64_t>(dk_tmp.dims()[0] * dk_tmp.dims()[1] + 31) / 32),
       static_cast<int64_t>(1024l));
+  PADDLE_ENFORCE_LE_UINT32_MAX(blockNum64, "flash_attn gqa reduce grid.x");
+  const uint32_t blockNum = static_cast<uint32_t>(blockNum64);
   const dim3 threadNum{32, 4, 1};
   auto sumkernel = selectSumkernel<T>(dk_tmp.dims()[4]);
   // here implicitly flat [batch,seqlen], and require batch dim to be contiguous
@@ -248,6 +252,16 @@ void FlashAttnUnpaddedGradBaseKernel(const Context& dev_ctx,
   const int64_t total_k = k.dims()[0];
   const int64_t num_heads_k = k.dims()[1];
   const int64_t total_q = dims[0];
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size, "flash_attn grad batch size");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads, "flash_attn grad num heads");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads_k, "flash_attn grad num heads k");
+  PADDLE_ENFORCE_LE_INT_MAX(head_size, "flash_attn grad head size");
+  PADDLE_ENFORCE_LE_INT_MAX(total_q, "flash_attn grad total q");
+  const int batch_size_i32 = static_cast<int>(batch_size);
+  const int num_heads_i32 = static_cast<int>(num_heads);
+  const int num_heads_k_i32 = static_cast<int>(num_heads_k);
+  const int head_size_i32 = static_cast<int>(head_size);
+  const int total_q_i32 = static_cast<int>(total_q);
 
   bool is_mha = (num_heads == num_heads_k);
 
@@ -300,12 +314,12 @@ void FlashAttnUnpaddedGradBaseKernel(const Context& dev_ctx,
   FlashAttnBwdParamsV2 params =
       FlashAttnBwdParamsV2(dev_ctx,
                            /*version=*/2,
-                           batch_size,
+                           batch_size_i32,
                            max_seqlen_q,
                            max_seqlen_k,
-                           num_heads,
-                           num_heads_k,
-                           head_size,
+                           num_heads_i32,
+                           num_heads_k_i32,
+                           head_size_i32,
                            dropout,
                            scale,
                            causal,
@@ -314,7 +328,7 @@ void FlashAttnUnpaddedGradBaseKernel(const Context& dev_ctx,
                            nullptr,  // startend_row_indices,
                            seed_offset.data<int64_t>(),
                            /*unpadded_lse*/ true,
-                           total_q);
+                           total_q_i32);
 
   VLOG(10) << "FlashAttn bwd seed: " << params.seed
            << ", offset: " << params.offset;
@@ -587,6 +601,18 @@ void FlashAttnGradBaseKernel(const Context& dev_ctx,
   const int64_t head_size = dims[3];
   const int64_t seqlen_k = k.dims()[1];
   const int64_t num_heads_k = k.dims()[2];
+  PADDLE_ENFORCE_LE_INT_MAX(batch_size, "flash_attn grad batch size");
+  PADDLE_ENFORCE_LE_INT_MAX(seqlen_q, "flash_attn grad seqlen q");
+  PADDLE_ENFORCE_LE_INT_MAX(seqlen_k, "flash_attn grad seqlen k");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads, "flash_attn grad num heads");
+  PADDLE_ENFORCE_LE_INT_MAX(num_heads_k, "flash_attn grad num heads k");
+  PADDLE_ENFORCE_LE_INT_MAX(head_size, "flash_attn grad head size");
+  const int batch_size_i32 = static_cast<int>(batch_size);
+  const int seqlen_q_i32 = static_cast<int>(seqlen_q);
+  const int seqlen_k_i32 = static_cast<int>(seqlen_k);
+  const int num_heads_i32 = static_cast<int>(num_heads);
+  const int num_heads_k_i32 = static_cast<int>(num_heads_k);
+  const int head_size_i32 = static_cast<int>(head_size);
 
   bool is_mha = (num_heads == num_heads_k);
 
@@ -641,12 +667,12 @@ void FlashAttnGradBaseKernel(const Context& dev_ctx,
   FlashAttnBwdParamsV2 params =
       FlashAttnBwdParamsV2(dev_ctx,
                            version,
-                           batch_size,
-                           seqlen_q,
-                           seqlen_k,
-                           num_heads,
-                           num_heads_k,
-                           head_size,
+                           batch_size_i32,
+                           seqlen_q_i32,
+                           seqlen_k_i32,
+                           num_heads_i32,
+                           num_heads_k_i32,
+                           head_size_i32,
                            dropout,
                            softmax_scale,
                            causal,

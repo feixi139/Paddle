@@ -18,6 +18,7 @@ limitations under the License. */
 
 #include "paddle/phi/common/amp_type_traits.h"
 #include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/tensor_utils.h"
 #include "paddle/phi/kernels/cast_kernel.h"
 #include "paddle/phi/kernels/expand_kernel.h"
@@ -428,9 +429,10 @@ void ComputeDDoutWithoutBroadcast(const GPUContext& dev_ctx UNUSED,
   auto* ddout_data = ddout->data<T>();
   int block = 512;
   int64_t grid = (out_numel + block - 1) / block;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid, "elementwise ddout grid.x");
   auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
   ComputeDDoutWithoutBroadcastGPUKernel<T, DDout_OP, T>
-      <<<grid, block, 0, stream>>>(
+      <<<static_cast<uint32_t>(grid), block, 0, stream>>>(
           ddx_data, ddy_data, y_data, out_data, ddout_data, out_numel, dout_op);
 }
 
@@ -496,19 +498,21 @@ void ComputeDDoutWithBroadcast(const GPUContext& dev_ctx UNUSED,
 
   int block = 512;
   int64_t grid = (out_numel + block - 1) / block;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid, "elementwise ddout grid.x");
   auto stream = reinterpret_cast<const GPUContext&>(dev_ctx).stream();
   ComputeDDoutWithBroadcastGPUKernel<T, DDout_OP, T>
-      <<<grid, block, 0, stream>>>(ddx_data,
-                                   ddy_data,
-                                   y_data,
-                                   out_data,
-                                   ddout_data,
-                                   out_numel,
-                                   x_dims_array_gpu_data,
-                                   y_dims_array_gpu_data,
-                                   out_dims_array_gpu_data,
-                                   max_dim,
-                                   dout_op);
+      <<<static_cast<uint32_t>(grid), block, 0, stream>>>(
+          ddx_data,
+          ddy_data,
+          y_data,
+          out_data,
+          ddout_data,
+          out_numel,
+          x_dims_array_gpu_data,
+          y_dims_array_gpu_data,
+          out_dims_array_gpu_data,
+          max_dim,
+          dout_op);
 }
 
 #endif

@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/core/enforce.h"
 
 #define CUDNN_FRONTEND_UNUSED(X) ((void)X)
@@ -593,8 +594,15 @@ void fused_attn_arbitrary_seqlen_fwd_impl(int64_t b,
     }
 
     if (is_padding) {
-      constexpr size_t nthreads_per_block = 128;
-      const size_t grid = (b + nthreads_per_block - 1) / nthreads_per_block;
+      constexpr size_t nthreads_per_block64 = 128;
+      const size_t grid64 =
+          (b + nthreads_per_block64 - 1) / nthreads_per_block64;
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "mha cudnn frontend grid.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(nthreads_per_block64,
+                                   "mha cudnn frontend block.x");
+      const uint32_t grid = static_cast<uint32_t>(grid64);
+      const uint32_t nthreads_per_block =
+          static_cast<uint32_t>(nthreads_per_block64);
       void *devActualSeqlenQ =
           static_cast<int8_t *>(workspace) + plan_workspace_size;
       void *devActualSeqlenKV =
@@ -610,6 +618,10 @@ void fused_attn_arbitrary_seqlen_fwd_impl(int64_t b,
             static_cast<int32_t *>(devActualSeqlenQ),
             static_cast<int32_t *>(devActualSeqlenKV));
       } else {
+        PADDLE_ENFORCE_LE_INT_MAX(s_q, "mha cudnn frontend q seqlen");
+        PADDLE_ENFORCE_LE_INT_MAX(s_kv, "mha cudnn frontend kv seqlen");
+        const int32_t s_q_i32 = static_cast<int32_t>(s_q);
+        const int32_t s_kv_i32 = static_cast<int32_t>(s_kv);
         // set all actual seqlens to max seqlen
         fill_cu_seqlen_with_constant<<<grid,
                                        nthreads_per_block,
@@ -617,8 +629,8 @@ void fused_attn_arbitrary_seqlen_fwd_impl(int64_t b,
                                        dev_ctx.stream()>>>(
             static_cast<int32_t *>(devActualSeqlenQ),
             static_cast<int32_t *>(devActualSeqlenKV),
-            static_cast<int32_t>(s_q),
-            static_cast<int32_t>(s_kv),
+            s_q_i32,
+            s_kv_i32,
             b);
       }
       variant_pack[seq_q] = devActualSeqlenQ;
@@ -955,8 +967,15 @@ void fused_attn_arbitrary_seqlen_bwd_impl(int64_t b,
     }
 
     if (is_padding) {
-      constexpr size_t nthreads_per_block = 128;
-      const size_t grid = (b + nthreads_per_block - 1) / nthreads_per_block;
+      constexpr size_t nthreads_per_block64 = 128;
+      const size_t grid64 =
+          (b + nthreads_per_block64 - 1) / nthreads_per_block64;
+      PADDLE_ENFORCE_LE_UINT32_MAX(grid64, "mha cudnn frontend grid.x");
+      PADDLE_ENFORCE_LE_UINT32_MAX(nthreads_per_block64,
+                                   "mha cudnn frontend block.x");
+      const uint32_t grid = static_cast<uint32_t>(grid64);
+      const uint32_t nthreads_per_block =
+          static_cast<uint32_t>(nthreads_per_block64);
       void *devActualSeqlenQ =
           static_cast<int8_t *>(workspace) + plan_workspace_size;
       void *devActualSeqlenKV =
@@ -972,6 +991,10 @@ void fused_attn_arbitrary_seqlen_bwd_impl(int64_t b,
             static_cast<int32_t *>(devActualSeqlenQ),
             static_cast<int32_t *>(devActualSeqlenKV));
       } else {
+        PADDLE_ENFORCE_LE_INT_MAX(s_q, "mha cudnn frontend q seqlen");
+        PADDLE_ENFORCE_LE_INT_MAX(s_kv, "mha cudnn frontend kv seqlen");
+        const int32_t s_q_i32 = static_cast<int32_t>(s_q);
+        const int32_t s_kv_i32 = static_cast<int32_t>(s_kv);
         // set all actual seqlens to max seqlen
         fill_cu_seqlen_with_constant<<<grid,
                                        nthreads_per_block,
@@ -979,8 +1002,8 @@ void fused_attn_arbitrary_seqlen_bwd_impl(int64_t b,
                                        dev_ctx.stream()>>>(
             static_cast<int32_t *>(devActualSeqlenQ),
             static_cast<int32_t *>(devActualSeqlenKV),
-            static_cast<int32_t>(s_q),
-            static_cast<int32_t>(s_kv),
+            s_q_i32,
+            s_kv_i32,
             b);
       }
       variant_pack[seq_q] = devActualSeqlenQ;

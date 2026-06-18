@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "paddle/phi/kernels/gumbel_softmax_kernel.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/common/amp_type_traits.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/funcs/axis_utils.h"
@@ -85,13 +86,23 @@ struct OneHotGenerator<GPUContext, T> {
                         const DenseTensor& X,
                         DenseTensor* out,
                         int axis) {
-    const int size_to_axis = funcs::SizeToAxis(axis, X.dims());
-    const int size_from_axis = funcs::SizeFromAxis(axis, X.dims());
-    const int size_out_axis = funcs::SizeOutAxis(axis, X.dims());
+    const int64_t size_to_axis_64 = funcs::SizeToAxis(axis, X.dims());
+    const int64_t size_from_axis_64 = funcs::SizeFromAxis(axis, X.dims());
+    const int64_t size_out_axis_64 = funcs::SizeOutAxis(axis, X.dims());
+    PADDLE_ENFORCE_LE_INT_MAX(size_to_axis_64, "gumbel_softmax size_to_axis");
+    PADDLE_ENFORCE_LE_INT_MAX(size_from_axis_64,
+                              "gumbel_softmax size_from_axis");
+    PADDLE_ENFORCE_LE_INT_MAX(size_out_axis_64, "gumbel_softmax size_out_axis");
+    const int size_to_axis = static_cast<int>(size_to_axis_64);
+    const int size_from_axis = static_cast<int>(size_from_axis_64);
+    const int size_out_axis = static_cast<int>(size_out_axis_64);
     constexpr int thread_size = 512;
     int64_t max_grid_dimx = dev_ctx.GetCUDAMaxGridDimSize()[0];
-    int64_t height = size_to_axis * size_out_axis;
-    int block_size = height < max_grid_dimx ? height : max_grid_dimx;
+    int64_t height = static_cast<int64_t>(size_to_axis) * size_out_axis;
+    int64_t block_size64 = height < max_grid_dimx ? height : max_grid_dimx;
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_size64, "gumbel_softmax one hot grid.x");
+    const uint32_t block_size = static_cast<uint32_t>(block_size64);
+    constexpr uint32_t thread_size_u32 = static_cast<uint32_t>(thread_size);
 
     DenseTensor input_tensor;
     input_tensor.Resize(out->dims());
@@ -99,7 +110,7 @@ struct OneHotGenerator<GPUContext, T> {
     Copy(dev_ctx, *out, dev_ctx.GetPlace(), false, &input_tensor);
     funcs::set_constant(dev_ctx, out, static_cast<T>(0.0));
     OneHotCUDAKernel<T, thread_size>
-        <<<block_size, thread_size, 0, dev_ctx.stream()>>>(
+        <<<block_size, thread_size_u32, 0, dev_ctx.stream()>>>(
             height,
             size_from_axis / size_out_axis,
             size_out_axis,
@@ -147,19 +158,27 @@ struct GumbleNoiseGenerator<GPUContext, T> {
     auto seed_offset = gen_cuda->IncrementOffset(1);
     uint64_t seed = seed_offset.first;
     uint64_t offset = seed_offset.second;
+    const uint64_t offset64 = size * offset;
+    PADDLE_ENFORCE_LE_UINT32_MAX(seed, "gumbel_softmax seed");
+    PADDLE_ENFORCE_LE_UINT32_MAX(offset64, "gumbel_softmax offset");
+    const uint32_t seed_u32 = static_cast<uint32_t>(seed);
+    const uint32_t offset_u32 = static_cast<uint32_t>(offset64);
 
     thrust::counting_iterator<int64_t> index_sequence_begin(0);
     thrust::transform(
         index_sequence_begin,
         index_sequence_begin + size,
         thrust::device_ptr<MT>(random_data),
-        UniformCUDAGenerator<MT>(0.00001, 1, seed, size * offset));
+        UniformCUDAGenerator<MT>(0.00001, 1, seed_u32, offset_u32));
 
     // add gumbel noise to X
     const int thread_size = 512;
-    int64_t block_size = (size + thread_size) / thread_size;
+    int64_t block_size64 = (size + thread_size) / thread_size;
+    PADDLE_ENFORCE_LE_UINT32_MAX(block_size64, "gumbel_softmax noise grid.x");
+    const uint32_t block_size = static_cast<uint32_t>(block_size64);
+    constexpr uint32_t thread_size_u32 = static_cast<uint32_t>(thread_size);
     AddGumbelNoiseCUDAKernel<T>
-        <<<block_size, thread_size, 0, dev_ctx.stream()>>>(
+        <<<block_size, thread_size_u32, 0, dev_ctx.stream()>>>(
             input_data, output_data, random_data, temperature, size);
   }
 };

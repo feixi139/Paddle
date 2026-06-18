@@ -17,6 +17,7 @@ limitations under the License. */
 
 #include <cstdio>
 #include <vector>
+#include "paddle/common/enforce.h"
 #ifdef __NVCC__
 #include "cub/cub.cuh"
 #endif
@@ -1126,13 +1127,21 @@ bool SortTopk(const GPUContext& dev_ctx,
     else
       return 64;
   };
-  int block_size = ComputeBlockSize(num_cols);
+  PADDLE_ENFORCE_LE_INT_MAX(num_cols, "top_k num_cols");
+  PADDLE_ENFORCE_LE_INT_MAX(num_rows, "top_k num_rows");
+  PADDLE_ENFORCE_LE_INT_MAX(num_cols * num_rows, "top_k num items");
+  const int num_cols_int = static_cast<int>(num_cols);
+  const int num_rows_int = static_cast<int>(num_rows);
+  const int num_items = static_cast<int>(num_cols * num_rows);
+  int block_size = ComputeBlockSize(num_cols_int);
 
   unsigned int maxGridDimX = dev_ctx.GetCUDAMaxGridDimSize()[0];
   // actually, int num_rows < max_grid_size
   unsigned int grid_size = num_rows < maxGridDimX
                                ? static_cast<unsigned int>(num_rows)
                                : maxGridDimX;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_size, "top_k init index grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(block_size, "top_k init index block.x");
   // Init a index array
   InitIndex<int64_t><<<grid_size, block_size, 0, cu_stream>>>(
       input_indices.data<int64_t>(), num_rows, num_cols);
@@ -1176,8 +1185,8 @@ bool SortTopk(const GPUContext& dev_ctx,
         sorted_values_ptr,
         input_indices.data<int64_t>(),
         sorted_indices_ptr,
-        num_cols * num_rows,
-        num_rows,
+        num_items,
+        num_rows_int,
         segment_offsets_t,
         segment_offsets_t + 1,
         0,
@@ -1210,8 +1219,8 @@ bool SortTopk(const GPUContext& dev_ctx,
                                                  sorted_values_ptr,
                                                  input_indices.data<int64_t>(),
                                                  sorted_indices_ptr,
-                                                 num_cols * num_rows,
-                                                 num_rows,
+                                                 num_items,
+                                                 num_rows_int,
                                                  segment_offsets_t,
                                                  segment_offsets_t + 1,
                                                  0,
@@ -1246,8 +1255,8 @@ bool SortTopk(const GPUContext& dev_ctx,
         sorted_values_ptr,
         input_indices.data<int64_t>(),
         sorted_indices_ptr,
-        num_cols * num_rows,
-        num_rows,
+        num_items,
+        num_rows_int,
         segment_offsets_t,
         segment_offsets_t + 1,
         0,
@@ -1282,8 +1291,8 @@ bool SortTopk(const GPUContext& dev_ctx,
                                                  sorted_values_ptr,
                                                  input_indices.data<int64_t>(),
                                                  sorted_indices_ptr,
-                                                 num_cols * num_rows,
-                                                 num_rows,
+                                                 num_items,
+                                                 num_rows_int,
                                                  segment_offsets_t,
                                                  segment_offsets_t + 1,
                                                  0,

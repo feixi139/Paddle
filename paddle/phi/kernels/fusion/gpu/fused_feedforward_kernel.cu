@@ -14,6 +14,7 @@
 
 #include "paddle/common/errors.h"
 #include "paddle/phi/api/include/tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/broadcast_function.h"
@@ -259,9 +260,13 @@ void FusedFeedForwardKernel(const Context& dev_ctx,
       funcs::CreateMatrixDescriptor(phi::RowMatrixFromVector(x_dim), 0, false);
 
   auto dim = linear1_weight_ptr->dims();
-  int d_model = dim[0];
-  int dim_feedforward = dim[dim.size() - 1];
-  int bsz_seq = mat_dim_x.batch_size_ * mat_dim_x.height_;
+  PADDLE_ENFORCE_LE_INT_MAX(dim[0], "fused feedforward d_model");
+  PADDLE_ENFORCE_LE_INT_MAX(dim[dim.size() - 1],
+                            "fused feedforward dim_feedforward");
+  int64_t bsz_seq = mat_dim_x.batch_size_ * mat_dim_x.height_;
+  PADDLE_ENFORCE_LE_INT_MAX(bsz_seq, "fused feedforward bsz_seq");
+  int d_model = static_cast<int>(dim[0]);
+  int dim_feedforward = static_cast<int>(dim[dim.size() - 1]);
 
   phi::fusion::FFN<T, Context>(dev_ctx,
                                x,
@@ -284,7 +289,7 @@ void FusedFeedForwardKernel(const Context& dev_ctx,
                                ln1_out,
                                dropout1_out,
                                dropout2_out,
-                               bsz_seq,
+                               static_cast<int>(bsz_seq),
                                d_model,
                                dim_feedforward,
                                act_method,

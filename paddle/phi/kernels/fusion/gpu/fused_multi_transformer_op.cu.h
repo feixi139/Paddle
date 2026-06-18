@@ -22,7 +22,9 @@ limitations under the License. */
 #include <fstream>
 #include <iomanip>
 
+#include "paddle/common/enforce.h"
 #include "paddle/common/flags.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/flash_attn_kernel.h"
 #include "paddle/phi/kernels/funcs/load_store_util.h"
 #include "paddle/phi/kernels/fusion/gpu/fused_bias_act_utils.h"
@@ -607,7 +609,10 @@ inline size_t smem_size_in_bytes(
                            store_func)                                    \
   size_t smem_sz =                                                        \
       smem_size_in_bytes<T>(params, Dh, THDS_PER_VALUE, THDS_PER_BLOCK);  \
-  dim3 grid(params.num_head, params.batch_size);                          \
+  PADDLE_ENFORCE_LE_UINT32_MAX(params.num_head, "mmha grid.x");           \
+  PADDLE_ENFORCE_LE_UINT32_MAX(params.batch_size, "mmha grid.y");         \
+  dim3 grid(static_cast<uint32_t>(params.num_head),                       \
+            static_cast<uint32_t>(params.batch_size));                    \
   constexpr auto kernel_fn =                                              \
       masked_multihead_attention_kernel<T,                                \
                                         Dh,                               \
@@ -1403,7 +1408,11 @@ inline size_t get_reduce_smem_size_in_bytes(
   kernel_fn<<<grid, THDS_PER_BLOCK, smem_sz, stream>>>(                     \
       params, load_func, reduce_store_func);                                \
                                                                             \
-  dim3 reduce_kernel_grid(params.num_head, params.batch_size, 1);           \
+  PADDLE_ENFORCE_LE_UINT32_MAX(params.num_head, "mbmmha reduce grid.x");    \
+  PADDLE_ENFORCE_LE_UINT32_MAX(params.batch_size, "mbmmha reduce grid.y");  \
+  dim3 reduce_kernel_grid(static_cast<uint32_t>(params.num_head),           \
+                          static_cast<uint32_t>(params.batch_size),         \
+                          1);                                               \
   size_t reduce_smem_sz = get_reduce_smem_size_in_bytes<T>(params);         \
   constexpr int MBLHA_REDUCE_BLOCK_SIZE = 256;                              \
   constexpr auto reduce_kernel_fn =                                         \
@@ -1528,7 +1537,9 @@ void mbfmha(const GPUContext &dev_ctx,
   params.neox_rotary_style = neox_rotary_style;
   if (src_mask_tensor) {
     params.attn_mask = src_mask_tensor->data<T>();
-    params.mask_length = src_mask_tensor->dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(src_mask_tensor->dims()[3],
+                              "fused multi transformer mask length");
+    params.mask_length = static_cast<int>(src_mask_tensor->dims()[3]);
   } else {
     params.attn_mask = nullptr;
     params.mask_length = -1;
@@ -1550,7 +1561,9 @@ void mbfmha(const GPUContext &dev_ctx,
   params.seq_len = seq_len;
   if (rotary_emb_dims > 0) {
     params.rotary_emb = rotary_tensor->data<float>();
-    params.rotary_bsz = rotary_tensor->dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(rotary_tensor->dims()[1],
+                              "fused multi transformer rotary bsz");
+    params.rotary_bsz = static_cast<int>(rotary_tensor->dims()[1]);
   } else {
     params.rotary_emb = nullptr;
     params.rotary_bsz = 0;
@@ -1580,10 +1593,13 @@ void mbfmha(const GPUContext &dev_ctx,
   For align offset, we also compute max_num_partitions by using
   `FLAGS_multi_block_attention_min_partition_size`.
   */
-  params.max_num_partitions = div_up(
-      params.timestep,
-      static_cast<int32_t>(FLAGS_multi_block_attention_min_partition_size));
-  params.partition_size = FLAGS_multi_block_attention_min_partition_size;
+  PADDLE_ENFORCE_LE_INT_MAX(FLAGS_multi_block_attention_min_partition_size,
+                            "fused multi transformer attention partition size");
+  params.max_num_partitions =
+      div_up(params.timestep,
+             static_cast<int>(FLAGS_multi_block_attention_min_partition_size));
+  params.partition_size =
+      static_cast<int>(FLAGS_multi_block_attention_min_partition_size);
 
   DispatchMBMMHA<T>(
       dev_ctx, stream, qkv_tensor, params, num_head, dim_head, out_tensor);
@@ -1629,7 +1645,9 @@ void fmha(const GPUContext &dev_ctx,
   params.neox_rotary_style = neox_rotary_style;
   if (src_mask_tensor) {
     params.attn_mask = src_mask_tensor->data<T>();
-    params.mask_length = src_mask_tensor->dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(src_mask_tensor->dims()[3],
+                              "fused multi transformer mask length");
+    params.mask_length = static_cast<int>(src_mask_tensor->dims()[3]);
   } else {
     params.attn_mask = nullptr;
     params.mask_length = -1;
@@ -1648,7 +1666,9 @@ void fmha(const GPUContext &dev_ctx,
 
   if (rotary_emb_dims > 0) {
     params.rotary_emb = rotary_tensor->data<float>();
-    params.rotary_bsz = rotary_tensor->dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(rotary_tensor->dims()[1],
+                              "fused multi transformer rotary bsz");
+    params.rotary_bsz = static_cast<int>(rotary_tensor->dims()[1]);
   } else {
     params.rotary_emb = nullptr;
     params.rotary_bsz = 0;
@@ -1656,7 +1676,9 @@ void fmha(const GPUContext &dev_ctx,
 
   if (beam_cache_offset_tensor) {
     params.beam_cache_offset = beam_cache_offset_tensor->data<int>();
-    params.beam_width = beam_cache_offset_tensor->dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(beam_cache_offset_tensor->dims()[1],
+                              "fused multi transformer beam width");
+    params.beam_width = static_cast<int>(beam_cache_offset_tensor->dims()[1]);
   }
 
   if (gqa_group_size > 0) {
@@ -1911,27 +1933,41 @@ void gqa_write_cachekv(
 
   int grid_size;
   GetNumBlocks(num_elems, &grid_size);
+  PADDLE_ENFORCE_LE_INT_MAX(gqa_group_size, "gqa_write_cache gqa_group_size");
+  PADDLE_ENFORCE_LE_INT_MAX(max_seq_len, "gqa_write_cache max_seq_len");
+  PADDLE_ENFORCE_LE_INT_MAX(seq_len, "gqa_write_cache seq_len");
+  PADDLE_ENFORCE_LE_INT_MAX(dim_head, "gqa_write_cache dim_head");
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_size, "gqa_write_cache grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(block_sz, "gqa_write_cache block.x");
+  const int gqa_group_size_int = static_cast<int>(gqa_group_size);
+  const int max_seq_len_int = static_cast<int>(max_seq_len);
+  const int seq_len_int = static_cast<int>(seq_len);
+  const int dim_head_int = static_cast<int>(dim_head);
+  const uint32_t grid_size_u32 = static_cast<uint32_t>(grid_size);
+  constexpr uint32_t block_sz_u32 = static_cast<uint32_t>(block_sz);
 
-  gqa_write_cache_k_kernel<T, x><<<grid_size, block_sz, 0, dev_ctx.stream()>>>(
-      cache_k,
-      unpadding_k.data<T>(),
-      seq_lens.data<int>(),
-      padding_offsets.data<int>(),
-      gqa_group_size,
-      max_seq_len,
-      seq_len,
-      dim_head,
-      num_elems);
-  gqa_write_cache_v_kernel<T, x><<<grid_size, block_sz, 0, dev_ctx.stream()>>>(
-      cache_v,
-      unpadding_v.data<T>(),
-      seq_lens.data<int>(),
-      padding_offsets.data<int>(),
-      gqa_group_size,
-      max_seq_len,
-      seq_len,
-      dim_head,
-      num_elems);
+  gqa_write_cache_k_kernel<T, x>
+      <<<grid_size_u32, block_sz_u32, 0, dev_ctx.stream()>>>(
+          cache_k,
+          unpadding_k.data<T>(),
+          seq_lens.data<int>(),
+          padding_offsets.data<int>(),
+          gqa_group_size_int,
+          max_seq_len_int,
+          seq_len_int,
+          dim_head_int,
+          num_elems);
+  gqa_write_cache_v_kernel<T, x>
+      <<<grid_size_u32, block_sz_u32, 0, dev_ctx.stream()>>>(
+          cache_v,
+          unpadding_v.data<T>(),
+          seq_lens.data<int>(),
+          padding_offsets.data<int>(),
+          gqa_group_size_int,
+          max_seq_len_int,
+          seq_len_int,
+          dim_head_int,
+          num_elems);
 }
 
 template <typename T, int VecSize>
@@ -2098,11 +2134,13 @@ inline cudaError_t GetNumBlocks(int64_t n, int *num_blocks) {
   const int max_thread_per_multiprocessor =
       backends::gpu::GetGPUMaxThreadsPerMultiProcessor(device_id);
 
-  *num_blocks =
-      std::max<int>(1,
-                    std::min<int64_t>((n + kBlockSize - 1) / kBlockSize,
-                                      sm_count * max_thread_per_multiprocessor /
-                                          kBlockSize * kNumWaves));
+  int64_t block_count = std::max<int64_t>(
+      1,
+      std::min<int64_t>(
+          (n + kBlockSize - 1) / kBlockSize,
+          sm_count * max_thread_per_multiprocessor / kBlockSize * kNumWaves));
+  PADDLE_ENFORCE_LE_INT_MAX(block_count, "fused multi transformer num blocks");
+  *num_blocks = static_cast<int>(block_count);
   return cudaSuccess;
 }
 
@@ -2557,10 +2595,11 @@ void InitValue(const GPUContext &dev_ctx,
       0,
       common::errors::PreconditionNotMet(
           "numel=%d must be divisible by vec_size=%d", numel, PackSize));
-  const int pack_num = numel / PackSize;
+  int64_t pack_num = numel / PackSize;
+  PADDLE_ENFORCE_LE_INT_MAX(pack_num, "fused multi transformer pack num");
   const int blocksize = 128;
   int grid_size = 1;
-  GetNumBlocks(pack_num, &grid_size);
+  GetNumBlocks(static_cast<int>(pack_num), &grid_size);
   InitOutValueKernel<T, PackSize>
       <<<grid_size, blocksize, 0, dev_ctx.stream()>>>(
           output_data, numel, init_value);

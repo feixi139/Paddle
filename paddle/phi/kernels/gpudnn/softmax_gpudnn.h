@@ -102,7 +102,8 @@ inline int CalcBlockSize(int vec_size, uint64_t dim_size) {
 
   while (block_size < (max_block_size)) block_size *= 2;
   block_size = std::max(block_size, static_cast<uint64_t>(PADDLE_WARP_SIZE));
-  return block_size;
+  PADDLE_ENFORCE_LE_INT_MAX(block_size, "softmax block size");
+  return static_cast<int>(block_size);
 }
 
 template <typename T, int BatchSize, int WarpSize>
@@ -1232,7 +1233,7 @@ void LaunchSoftmaxForwardCudnnKernel(const GPUContext& dev_ctx,
   int64_t batch_size = std::numeric_limits<int32_t>::max() / dim;
   int64_t offset = batch_size * dim;
   while (remaining > 0) {
-    tensor_dims[0] = std::min<int64_t>(remaining, batch_size);
+    tensor_dims[0] = static_cast<int>(std::min<int64_t>(remaining, batch_size));
     SoftmaxForwardCudnnKernel<T>(
         dev_ctx, x_data, axis, rank, log_mode, tensor_dims, out_data);
     x_data += offset;
@@ -1310,7 +1311,7 @@ void LaunchSoftmaxBackwardCudnnKernel(const GPUContext& dev_ctx,
   int64_t batch_size = std::numeric_limits<int32_t>::max() / dim;
   int64_t offset = batch_size * dim;
   while (remaining > 0) {
-    tensor_dims[0] = std::min<int64_t>(remaining, batch_size);
+    tensor_dims[0] = static_cast<int>(std::min<int64_t>(remaining, batch_size));
     SoftmaxBackwardCudnnKernel<T>(dev_ctx,
                                   out_data,
                                   dout_data,
@@ -1336,8 +1337,10 @@ void LaunchKeMatrixSoftmaxForwardKernel(const GPUContext& dev_ctx,
   constexpr int kVecSize =
       MaxWithOne<MATRIX_SOFTMAX_ALIGN_BYTES / sizeof(T)>::kValue;
   int block_dim = CalcBlockSize(kVecSize, dim_size);
+  PADDLE_ENFORCE_LE_UINT32_MAX(N, "softmax grid.x");
   KeMatrixSoftmaxForward<T, AccT, IndexType, LogMode>
-      <<<N, block_dim, 0, dev_ctx.stream()>>>(out, input, dim_size);
+      <<<static_cast<uint32_t>(N), block_dim, 0, dev_ctx.stream()>>>(
+          out, input, dim_size);
 }
 
 #if CUDNN_VERSION < 8100
@@ -1504,7 +1507,8 @@ inline dim3 SoftMaxForwardGetBlockSize(uint64_t dim_size) {
   } else {
     block_size = (max_block_size / warp_size + 1) * warp_size;
   }
-  return dim3(block_size);
+  PADDLE_ENFORCE_LE_UINT32_MAX(block_size, "softmax forward block.x");
+  return dim3(static_cast<uint32_t>(block_size));
 }
 
 template <typename AccT, typename IndexType, typename Kernel>
@@ -2581,7 +2585,10 @@ void dispatch_host_softmax_forward(const GPUContext& dev_ctx,
       (!(reinterpret_cast<uintptr_t>(out_data) % SOFTMAX_ALIGN_BYTES));
   can_use_smem &= !(dim_size % VecSize);
 
-  int32_t potential_reg_cnt = (dim_size + block.x - 1) / block.x;
+  PADDLE_ENFORCE_LE_INT_MAX((dim_size + block.x - 1) / block.x,
+                            "softmax potential reg count");
+  int32_t potential_reg_cnt =
+      static_cast<int32_t>((dim_size + block.x - 1) / block.x);
   if (potential_reg_cnt < 10) {
     switch (potential_reg_cnt) {
 #define LAUNCH_SOFTMAX_FORWARD_REG(kRegCnt)                       \
@@ -2745,7 +2752,7 @@ void SoftmaxBackwardCUDAKernelCompatible(const GPUContext& dev_ctx,
             out_data,
             dim,
             dim,
-            std::min<int64_t>(remaining, chunk_size));
+            static_cast<IndexType>(std::min<int64_t>(remaining, chunk_size)));
         dx_data += chunk_size * dim;
         dout_data += chunk_size * dim;
         out_data += chunk_size * dim;
@@ -2936,7 +2943,7 @@ void SoftmaxBackwardCUDAKernelDriverImpl(const GPUContext& dev_ctx,
         N > std::numeric_limits<int32_t>::max() ||
         dim > std::numeric_limits<int32_t>::max() ||
         D > std::numeric_limits<int32_t>::max()) {
-      int dim_log2 = Log2Ceil(dim);
+      int dim_log2 = static_cast<int>(Log2Ceil(dim));
       IndexType dim_ceil = 1 << dim_log2;
       int warp_size =
           (dim_ceil < PADDLE_WARP_SIZE) ? dim_ceil : PADDLE_WARP_SIZE;

@@ -1047,8 +1047,17 @@ static void ElemwiseGradBroadcast1CUDA(gpuStream_t stream,
               x, y, out, dout, h, w, is_xsize_larger, dx_op, dy_op, dx, dy);
     } else {
       ElemwiseGradBroadcast1CUDAKernel<uint32_t>
-          <<<grid_size, block_size, 0, stream>>>(
-              x, y, out, dout, h, w, is_xsize_larger, dx_op, dy_op, dx, dy);
+          <<<grid_size, block_size, 0, stream>>>(x,
+                                                 y,
+                                                 out,
+                                                 dout,
+                                                 static_cast<uint32_t>(h),
+                                                 static_cast<uint32_t>(w),
+                                                 is_xsize_larger,
+                                                 dx_op,
+                                                 dy_op,
+                                                 dx,
+                                                 dy);
     }
 
   } else {
@@ -1066,8 +1075,17 @@ static void ElemwiseGradBroadcast1CUDA(gpuStream_t stream,
               x, y, out, dout, h, w, is_xsize_larger, dx_op, dy_op, dx, dy);
     } else {
       FastElemwiseGradBroadcast1CUDAKernel<uint32_t>
-          <<<grid_size, block_size, 0, stream>>>(
-              x, y, out, dout, h, w, is_xsize_larger, dx_op, dy_op, dx, dy);
+          <<<grid_size, block_size, 0, stream>>>(x,
+                                                 y,
+                                                 out,
+                                                 dout,
+                                                 static_cast<uint32_t>(h),
+                                                 static_cast<uint32_t>(w),
+                                                 is_xsize_larger,
+                                                 dx_op,
+                                                 dy_op,
+                                                 dx,
+                                                 dy);
     }
   }
 }
@@ -1101,9 +1119,19 @@ static void ElemwiseGradBroadcast2CUDA(gpuStream_t stream,
         int64_t><<<grid_size, block_size, 0, stream>>>(
         x, y, out, dout, pre, n, post, is_xsize_larger, dx_op, dy_op, dx, dy);
   } else {
-    ElemwiseGradBroadcast2CUDAKernel<
-        uint32_t><<<grid_size, block_size, 0, stream>>>(
-        x, y, out, dout, pre, n, post, is_xsize_larger, dx_op, dy_op, dx, dy);
+    ElemwiseGradBroadcast2CUDAKernel<uint32_t>
+        <<<grid_size, block_size, 0, stream>>>(x,
+                                               y,
+                                               out,
+                                               dout,
+                                               static_cast<uint32_t>(pre),
+                                               static_cast<uint32_t>(n),
+                                               static_cast<uint32_t>(post),
+                                               is_xsize_larger,
+                                               dx_op,
+                                               dy_op,
+                                               dx,
+                                               dy);
   }
 }
 
@@ -1323,12 +1351,12 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                      y_data,
                                                      out_data,
                                                      dout_data,
-                                                     h,
-                                                     w,
+                                                     static_cast<uint32_t>(h),
+                                                     static_cast<uint32_t>(w),
                                                      dy_op,
                                                      dy_data,
-                                                     kh,
-                                                     kw,
+                                                     static_cast<uint32_t>(kh),
+                                                     static_cast<uint32_t>(kw),
                                                      is_y);
         }
 
@@ -1360,12 +1388,12 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                      y_data,
                                                      out_data,
                                                      dout_data,
-                                                     h,
-                                                     w,
+                                                     static_cast<uint32_t>(h),
+                                                     static_cast<uint32_t>(w),
                                                      dy_op,
                                                      dy_data,
-                                                     kh,
-                                                     kw,
+                                                     static_cast<uint32_t>(kh),
+                                                     static_cast<uint32_t>(kw),
                                                      is_y);
         }
       }
@@ -1399,12 +1427,12 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                      y_data,
                                                      out_data,
                                                      dout_data,
-                                                     h,
-                                                     w,
+                                                     static_cast<uint32_t>(h),
+                                                     static_cast<uint32_t>(w),
                                                      dx_op,
                                                      dx_data,
-                                                     kh,
-                                                     kw,
+                                                     static_cast<uint32_t>(kh),
+                                                     static_cast<uint32_t>(kw),
                                                      is_y);
         }
 
@@ -1436,12 +1464,12 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                      y_data,
                                                      out_data,
                                                      dout_data,
-                                                     h,
-                                                     w,
+                                                     static_cast<uint32_t>(h),
+                                                     static_cast<uint32_t>(w),
                                                      dx_op,
                                                      dx_data,
-                                                     kh,
-                                                     kw,
+                                                     static_cast<uint32_t>(kh),
+                                                     static_cast<uint32_t>(kw),
                                                      is_y);
         }
       }
@@ -1466,8 +1494,8 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
     bool use_int64_index = h * w > std::numeric_limits<int32_t>::max();
 
     if (w < 16 || h < 16) {
-      int block_size =
-          std::min(static_cast<int64_t>(ELEMWISE_MAX_BLOCK_DIM), h);
+      int block_size = static_cast<int>(
+          std::min(static_cast<int64_t>(ELEMWISE_MAX_BLOCK_DIM), h));
       int64_t grid_size_64 = w;
       auto *dev_ctx = funcs::GetCurrentContext();
       int64_t max_grid_dim = dev_ctx->GetCUDAMaxGridDimSize()[0];
@@ -1493,8 +1521,8 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                    y_data,
                                                    out_data,
                                                    dout_data,
-                                                   h,
-                                                   w,
+                                                   static_cast<uint32_t>(h),
+                                                   static_cast<uint32_t>(w),
                                                    x_large,
                                                    dx_op,
                                                    dy_op,
@@ -1529,8 +1557,8 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                    y_data,
                                                    out_data,
                                                    dout_data,
-                                                   h,
-                                                   w,
+                                                   static_cast<uint32_t>(h),
+                                                   static_cast<uint32_t>(w),
                                                    x_large,
                                                    dx_op,
                                                    dy_op,
@@ -1597,9 +1625,9 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                  y_data,
                                                  out_data,
                                                  dout_data,
-                                                 pre,
-                                                 mid,
-                                                 post,
+                                                 static_cast<uint32_t>(pre),
+                                                 static_cast<uint32_t>(mid),
+                                                 static_cast<uint32_t>(post),
                                                  is_x_large,
                                                  dx_op,
                                                  dy_op,
@@ -1665,19 +1693,20 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                    dx_data);
       } else {
         FastCommonGradBroadcastOneCUDAKernel<uint32_t>
-            <<<grid_size, block_size, 0, stream>>>(x_data,
-                                                   y_data,
-                                                   out_data,
-                                                   dout_data,
-                                                   pre,
-                                                   mid,
-                                                   post,
-                                                   k_pre,
-                                                   k_mid,
-                                                   k_post,
-                                                   true,
-                                                   dx_op,
-                                                   dx_data);
+            <<<grid_size, block_size, 0, stream>>>(
+                x_data,
+                y_data,
+                out_data,
+                dout_data,
+                static_cast<uint32_t>(pre),
+                static_cast<uint32_t>(mid),
+                static_cast<uint32_t>(post),
+                static_cast<uint32_t>(k_pre),
+                static_cast<uint32_t>(k_mid),
+                static_cast<uint32_t>(k_post),
+                true,
+                dx_op,
+                dx_data);
       }
 
     } else {
@@ -1718,19 +1747,20 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                                    dy_data);
       } else {
         FastCommonGradBroadcastOneCUDAKernel<uint32_t>
-            <<<grid_size, block_size, 0, stream>>>(x_data,
-                                                   y_data,
-                                                   out_data,
-                                                   dout_data,
-                                                   pre,
-                                                   mid,
-                                                   post,
-                                                   k_pre,
-                                                   k_mid,
-                                                   k_post,
-                                                   false,
-                                                   dy_op,
-                                                   dy_data);
+            <<<grid_size, block_size, 0, stream>>>(
+                x_data,
+                y_data,
+                out_data,
+                dout_data,
+                static_cast<uint32_t>(pre),
+                static_cast<uint32_t>(mid),
+                static_cast<uint32_t>(post),
+                static_cast<uint32_t>(k_pre),
+                static_cast<uint32_t>(k_mid),
+                static_cast<uint32_t>(k_post),
+                false,
+                dy_op,
+                dy_data);
       }
     }
     VLOG(3) << "FastBroadCastOneCUDAF pre:" << pre << " mid:" << mid
@@ -1869,10 +1899,12 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                                           out_dims_array + max_dim,
                                           static_cast<int64_t>(1),
                                           std::multiplies<int64_t>());
-  int x_block_size =
-      std::min(static_cast<int64_t>(ELEMWISE_MAX_BLOCK_DIM), x_threads);
-  int y_block_size =
-      std::min(static_cast<int64_t>(ELEMWISE_MAX_BLOCK_DIM), y_threads);
+  PADDLE_ENFORCE_LE_UINT32_MAX(x_blocks, "elementwise grad x grid.x");
+  PADDLE_ENFORCE_LE_UINT32_MAX(y_blocks, "elementwise grad y grid.x");
+  int x_block_size = static_cast<int>(
+      std::min(static_cast<int64_t>(ELEMWISE_MAX_BLOCK_DIM), x_threads));
+  int y_block_size = static_cast<int>(
+      std::min(static_cast<int64_t>(ELEMWISE_MAX_BLOCK_DIM), y_threads));
   if (dx) {
     size_t dx_total_bytes = bytes * 2;
     auto dx_tmp_buffer = phi::memory_utils::Alloc(
@@ -1906,36 +1938,42 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                        dev_ctx.stream());
     if (out_size > std::numeric_limits<int32_t>::max()) {
       CommonGradBroadcastCUDAKernel<int64_t, T, DX_OP, Tout>
-          <<<x_blocks, x_block_size, 0, dev_ctx.stream()>>>(x_strides_array_gpu,
-                                                            y_strides_array_gpu,
-                                                            out_dims_array_gpu,
-                                                            x_strides_order_gpu,
-                                                            x_dims_order_gpu,
-                                                            x_data,
-                                                            y_data,
-                                                            out_data,
-                                                            dout_data,
-                                                            dx_data,
-                                                            out_size,
-                                                            max_dim,
-                                                            x_threads,
-                                                            dx_op);
+          <<<static_cast<uint32_t>(x_blocks),
+             x_block_size,
+             0,
+             dev_ctx.stream()>>>(x_strides_array_gpu,
+                                 y_strides_array_gpu,
+                                 out_dims_array_gpu,
+                                 x_strides_order_gpu,
+                                 x_dims_order_gpu,
+                                 x_data,
+                                 y_data,
+                                 out_data,
+                                 dout_data,
+                                 dx_data,
+                                 out_size,
+                                 max_dim,
+                                 x_threads,
+                                 dx_op);
     } else {
       CommonGradBroadcastCUDAKernel<uint32_t, T, DX_OP, Tout>
-          <<<x_blocks, x_block_size, 0, dev_ctx.stream()>>>(x_strides_array_gpu,
-                                                            y_strides_array_gpu,
-                                                            out_dims_array_gpu,
-                                                            x_strides_order_gpu,
-                                                            x_dims_order_gpu,
-                                                            x_data,
-                                                            y_data,
-                                                            out_data,
-                                                            dout_data,
-                                                            dx_data,
-                                                            out_size,
-                                                            max_dim,
-                                                            x_threads,
-                                                            dx_op);
+          <<<static_cast<uint32_t>(x_blocks),
+             x_block_size,
+             0,
+             dev_ctx.stream()>>>(x_strides_array_gpu,
+                                 y_strides_array_gpu,
+                                 out_dims_array_gpu,
+                                 x_strides_order_gpu,
+                                 x_dims_order_gpu,
+                                 x_data,
+                                 y_data,
+                                 out_data,
+                                 dout_data,
+                                 dx_data,
+                                 static_cast<uint32_t>(out_size),
+                                 max_dim,
+                                 static_cast<uint32_t>(x_threads),
+                                 dx_op);
     }
   }
   if (dy) {
@@ -1972,36 +2010,42 @@ void CommonGradBroadcastCUDA(const DenseTensor &x,
                        dev_ctx.stream());
     if (out_size > std::numeric_limits<int32_t>::max()) {
       CommonGradBroadcastCUDAKernel<int64_t, T, DY_OP, Tout>
-          <<<y_blocks, y_block_size, 0, dev_ctx.stream()>>>(x_strides_array_gpu,
-                                                            y_strides_array_gpu,
-                                                            out_dims_array_gpu,
-                                                            y_strides_order_gpu,
-                                                            y_dims_order_gpu,
-                                                            x_data,
-                                                            y_data,
-                                                            out_data,
-                                                            dout_data,
-                                                            dy_data,
-                                                            out_size,
-                                                            max_dim,
-                                                            y_threads,
-                                                            dy_op);
+          <<<static_cast<uint32_t>(y_blocks),
+             y_block_size,
+             0,
+             dev_ctx.stream()>>>(x_strides_array_gpu,
+                                 y_strides_array_gpu,
+                                 out_dims_array_gpu,
+                                 y_strides_order_gpu,
+                                 y_dims_order_gpu,
+                                 x_data,
+                                 y_data,
+                                 out_data,
+                                 dout_data,
+                                 dy_data,
+                                 out_size,
+                                 max_dim,
+                                 y_threads,
+                                 dy_op);
     } else {
-      CommonGradBroadcastCUDAKernel<int32_t, T, DY_OP, Tout>
-          <<<y_blocks, y_block_size, 0, dev_ctx.stream()>>>(x_strides_array_gpu,
-                                                            y_strides_array_gpu,
-                                                            out_dims_array_gpu,
-                                                            y_strides_order_gpu,
-                                                            y_dims_order_gpu,
-                                                            x_data,
-                                                            y_data,
-                                                            out_data,
-                                                            dout_data,
-                                                            dy_data,
-                                                            out_size,
-                                                            max_dim,
-                                                            y_threads,
-                                                            dy_op);
+      CommonGradBroadcastCUDAKernel<uint32_t, T, DY_OP, Tout>
+          <<<static_cast<uint32_t>(y_blocks),
+             y_block_size,
+             0,
+             dev_ctx.stream()>>>(x_strides_array_gpu,
+                                 y_strides_array_gpu,
+                                 out_dims_array_gpu,
+                                 y_strides_order_gpu,
+                                 y_dims_order_gpu,
+                                 x_data,
+                                 y_data,
+                                 out_data,
+                                 dout_data,
+                                 dy_data,
+                                 static_cast<uint32_t>(out_size),
+                                 max_dim,
+                                 static_cast<uint32_t>(y_threads),
+                                 dy_op);
     }
   }
 }

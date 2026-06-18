@@ -379,7 +379,7 @@ void LaunchResidualDropoutBias(const uint64_t rows,
   }
 
   const int VecSize = MAX_CACHE_BYTES / sizeof(T);
-  const int64_t real_vec_size = cols % VecSize == 0 ? VecSize : 1;
+  const int real_vec_size = cols % VecSize == 0 ? VecSize : 1;
   auto config = Get1DBlocksAnd2DGrids(dev_ctx, rows, cols, real_vec_size);
 
 #define PD_LAUNCH_FUSED_RESIDUAL_DROPOUT_BIAS_KERNEL(__has_dropout)           \

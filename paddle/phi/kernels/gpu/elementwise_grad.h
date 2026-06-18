@@ -17,6 +17,7 @@ limitations under the License. */
 #include "glog/logging.h"
 
 #include "paddle/phi/common/place.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/tensor_utils.h"
 #include "paddle/phi/kernels/full_kernel.h"
 #include "paddle/phi/kernels/funcs/broadcast_function.h"
@@ -354,10 +355,11 @@ void ElementwiseAddGrad(const GPUContext &dev_ctx,
     auto size = x.numel();
     int vec_size = max(static_cast<int>(sizeof(float4) / sizeof(T)), 1);
     dim3 block_size = dim3(PREDEFINED_BLOCK_SIZE, 1);
-    dim3 grid_size =
-        dim3(((size + vec_size - 1) / vec_size + PREDEFINED_BLOCK_SIZE - 1) /
-                 PREDEFINED_BLOCK_SIZE,
-             1);
+    int64_t grid_size_x =
+        ((size + vec_size - 1) / vec_size + PREDEFINED_BLOCK_SIZE - 1) /
+        PREDEFINED_BLOCK_SIZE;
+    PADDLE_ENFORCE_LE_UINT32_MAX(grid_size_x, "elementwise add grad grid.x");
+    dim3 grid_size(static_cast<uint32_t>(grid_size_x), 1);
     if (size < std::numeric_limits<int>::max()) {
       SimpleElemwiseAddGradCUDAKernel<T>
           <<<grid_size, block_size, 0, dev_ctx.stream()>>>(
@@ -443,8 +445,11 @@ void default_elementwise_sub_grad(const GPUContext &dev_ctx,
       if (dy_data != dout_data) {
         dim3 block_size = dim3(PREDEFINED_BLOCK_SIZE, 1);
         auto size = dy->numel();
-        dim3 grid_size =
-            dim3((size + PREDEFINED_BLOCK_SIZE - 1) / PREDEFINED_BLOCK_SIZE, 1);
+        int64_t grid_size_x =
+            (size + PREDEFINED_BLOCK_SIZE - 1) / PREDEFINED_BLOCK_SIZE;
+        PADDLE_ENFORCE_LE_UINT32_MAX(grid_size_x,
+                                     "elementwise sub grad grid.x");
+        dim3 grid_size(static_cast<uint32_t>(grid_size_x), 1);
         SimpleElemwiseSubGradCUDAKernel<T>
             <<<grid_size, block_size, 0, dev_ctx.stream()>>>(
                 dout.data<T>(), size, nullptr, dev_ctx.template Alloc<T>(dy));
@@ -468,8 +473,10 @@ void elementwise_sub_grad(const GPUContext &dev_ctx,
                           DenseTensor *dy) {
   dim3 block_size = dim3(PREDEFINED_BLOCK_SIZE, 1);
   auto size = x.numel();
-  dim3 grid_size =
-      dim3((size + PREDEFINED_BLOCK_SIZE - 1) / PREDEFINED_BLOCK_SIZE, 1);
+  int64_t grid_size_x =
+      (size + PREDEFINED_BLOCK_SIZE - 1) / PREDEFINED_BLOCK_SIZE;
+  PADDLE_ENFORCE_LE_UINT32_MAX(grid_size_x, "elementwise sub grad grid.x");
+  dim3 grid_size(static_cast<uint32_t>(grid_size_x), 1);
   SimpleElemwiseSubGradCUDAKernel<T>
       <<<grid_size, block_size, 0, dev_ctx.stream()>>>(
           dout.data<T>(),

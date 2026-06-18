@@ -22,6 +22,7 @@
 
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/funcs/dropout_impl_util.h"
 #include "paddle/phi/kernels/funcs/functors.h"
 #include "paddle/phi/kernels/fusion/gpu/fused_bias_act_utils.h"
@@ -72,8 +73,7 @@ struct DropoutParam {
     seed_val = seed_val_;
   }
 
-  uint64_t UpdateSeedAndIncrement(const GPUContext& dev_ctx,
-                                  const uint64_t offset) {
+  int UpdateSeedAndIncrement(const GPUContext& dev_ctx, const uint64_t offset) {
     uint64_t tmp_increment;
     funcs::GetSeedDataAndIncrement(dev_ctx,
                                    tensor_seed,
@@ -82,7 +82,8 @@ struct DropoutParam {
                                    offset,
                                    &seed,
                                    &tmp_increment);
-    increment = tmp_increment;
+    PADDLE_ENFORCE_LE_INT_MAX(tmp_increment, "fused dropout increment");
+    increment = static_cast<int>(tmp_increment);
     return increment;
   }
 };
@@ -105,22 +106,21 @@ template <typename T,
           typename OutType = T>
 class FusedDropoutHelper {
  private:
-  uint64_t GetIncrement(const GPUContext& dev_ctx) {
+  int GetIncrement(const GPUContext& dev_ctx) {
     const int VecSize = MAX_CACHE_BYTES / sizeof(T);
     const int real_vec_size = cols_ % VecSize == 0 ? VecSize : 1;
     auto config = Get1DBlocksAnd2DGrids(dev_ctx,
                                         static_cast<uint64_t>(rows_),
                                         static_cast<uint64_t>(cols_),
                                         real_vec_size);
-    uint64_t increment =
+    uint64_t increment_offset =
         ((cols_ - static_cast<uint64_t>(1)) /
              (static_cast<uint64_t>(config.thread_per_block.x) *
               static_cast<uint64_t>(config.block_per_grid.x) *
               static_cast<uint64_t>(real_vec_size)) +
          static_cast<uint64_t>(1)) *
         static_cast<uint64_t>(real_vec_size);
-    increment = dropout_param_.UpdateSeedAndIncrement(dev_ctx, increment);
-    return increment;
+    return dropout_param_.UpdateSeedAndIncrement(dev_ctx, increment_offset);
   }
 
  public:
@@ -173,13 +173,15 @@ class FusedDropoutHelper {
                                T* d_src,
                                T* d_residual,
                                T* d_bias) {
+    PADDLE_ENFORCE_LE_UINT32_MAX(rows_, "fused dropout grad rows");
+    PADDLE_ENFORCE_LE_UINT32_MAX(cols_, "fused dropout grad cols");
     LaunchResidualDropoutBiasGrad<T, uint8_t>(
         d_out,
         mask,
         dropout_param_.dropout_prob,
         dropout_param_.is_upscale_in_train,
-        rows_,
-        cols_,
+        static_cast<uint32_t>(rows_),
+        static_cast<uint32_t>(cols_),
         d_src,
         d_bias,
         dev_ctx);
@@ -206,6 +208,10 @@ class FusedDropoutHelper {
                       const int quant_round_type = 1,
                       const float quant_max_bound = 127.0,
                       const float quant_min_bound = -127.0) {
+    PADDLE_ENFORCE_LE_UINT32_MAX(rows_, "fused dropout act rows");
+    PADDLE_ENFORCE_LE_UINT32_MAX(cols_, "fused dropout act cols");
+    uint32_t rows = static_cast<uint32_t>(rows_);
+    uint32_t cols = static_cast<uint32_t>(cols_);
     auto increment = GetIncrement(dev_ctx);
     if (act_method == "gelu") {
       if (FLAGS_use_fast_math) {
@@ -217,8 +223,8 @@ class FusedDropoutHelper {
                                           OutType>(
             fast_gelu,
             dropout_param_.seed,
-            rows_,
-            cols_,
+            rows,
+            cols,
             dropout_param_.increment,
             dropout_param_.dropout_prob,
             dropout_param_.is_upscale_in_train,
@@ -243,8 +249,8 @@ class FusedDropoutHelper {
             InType,
             OutType>(gelu,
                      dropout_param_.seed,
-                     rows_,
-                     cols_,
+                     rows,
+                     cols,
                      dropout_param_.increment,
                      dropout_param_.dropout_prob,
                      dropout_param_.is_upscale_in_train,
@@ -270,8 +276,8 @@ class FusedDropoutHelper {
                                         OutType>(
           relu,
           dropout_param_.seed,
-          rows_,
-          cols_,
+          rows,
+          cols,
           increment,
           dropout_param_.dropout_prob,
           dropout_param_.is_upscale_in_train,
@@ -301,6 +307,10 @@ class FusedDropoutHelper {
                           T* d_src,
                           T* d_bias,
                           const std::string& act_method) {
+    PADDLE_ENFORCE_LE_UINT32_MAX(rows_, "fused dropout act grad rows");
+    PADDLE_ENFORCE_LE_UINT32_MAX(cols_, "fused dropout act grad cols");
+    uint32_t rows = static_cast<uint32_t>(rows_);
+    uint32_t cols = static_cast<uint32_t>(cols_);
     if (act_method == "gelu") {
       phi::fusion::GeluGradFunctor<T> gelu_grad;
       phi::fusion::LaunchDropoutActBiasGrad<T,
@@ -313,8 +323,8 @@ class FusedDropoutHelper {
           bias,
           dropout_param_.dropout_prob,
           dropout_param_.is_upscale_in_train,
-          rows_,
-          cols_,
+          rows,
+          cols,
           d_src,
           d_bias,
           dev_ctx);
@@ -329,8 +339,8 @@ class FusedDropoutHelper {
               bias,
               dropout_param_.dropout_prob,
               dropout_param_.is_upscale_in_train,
-              rows_,
-              cols_,
+              rows,
+              cols,
               d_src,
               d_bias,
               dev_ctx);
@@ -455,8 +465,10 @@ class FusedDropoutLayerNormHelper
       vec_size = 1;
     }
     int threads = funcs::GetDesiredBlockDim(this->cols_ / vec_size);
-    int increment = ((this->cols_ - 1) / (threads * vec_size) + 1) * vec_size;
-    increment = this->dropout_param_.UpdateSeedAndIncrement(dev_ctx, increment);
+    int64_t increment =
+        ((this->cols_ - 1) / (static_cast<int64_t>(threads) * vec_size) + 1) *
+        vec_size;
+    PADDLE_ENFORCE_LE_INT_MAX(increment, "fused layernorm dropout increment");
     LaunchLayernormResidualDropoutBias<T,
                                        MaskType,
                                        U,
@@ -465,7 +477,8 @@ class FusedDropoutLayerNormHelper
                                        OutType>(
         this->rows_,
         this->cols_,
-        increment,
+        this->dropout_param_.UpdateSeedAndIncrement(
+            dev_ctx, static_cast<uint64_t>(increment)),
         this->dropout_param_.seed,
         this->dropout_param_.dropout_prob,
         epsilon_,
