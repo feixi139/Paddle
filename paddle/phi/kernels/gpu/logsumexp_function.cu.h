@@ -14,6 +14,7 @@
 #pragma once
 
 #include <assert.h>
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/funcs/aligned_vector.h"
 #include "paddle/phi/kernels/primitive/functor_primitives.h"
 
@@ -66,8 +67,10 @@ inline void GetNumBlocks(int64_t block_size,
   int tpm;
   PADDLE_ENFORCE_GPU_SUCCESS(hipDeviceGetAttribute(
       &tpm, hipDeviceAttributeMaxThreadsPerMultiProcessor, dev));
-  *num_blocks = std::max<int>(
+  int64_t blocks = std::max<int64_t>(
       1, std::min<int64_t>(max_blocks, sm_count * tpm / block_size * waves));
+  PADDLE_ENFORCE_LE_INT_MAX(blocks, "logsumexp num blocks");
+  *num_blocks = static_cast<int>(blocks);
 }
 #else
 inline void GetNumBlocks(int64_t block_size,
@@ -82,8 +85,10 @@ inline void GetNumBlocks(int64_t block_size,
   int tpm;
   PADDLE_ENFORCE_GPU_SUCCESS(cudaDeviceGetAttribute(
       &tpm, cudaDevAttrMaxThreadsPerMultiProcessor, dev));
-  *num_blocks = std::max<int>(
+  int64_t blocks = std::max<int64_t>(
       1, std::min<int64_t>(max_blocks, sm_count * tpm / block_size * waves));
+  PADDLE_ENFORCE_LE_INT_MAX(blocks, "logsumexp num blocks");
+  *num_blocks = static_cast<int>(blocks);
 }
 #endif
 

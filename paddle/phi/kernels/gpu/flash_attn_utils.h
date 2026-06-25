@@ -200,8 +200,11 @@ struct FlashAttnParamsBase {
       head_size_rounded = round_multiple(head_size, 32);
     }
 
-    seqlen_q_rounded = round_multiple(max_seqlen_q, kBlockM);
-    seqlen_k_rounded = round_multiple(max_seqlen_k, 128);
+    PADDLE_ENFORCE_LE_INT_MAX(max_seqlen_q, "flash_attn max_seqlen_q");
+    PADDLE_ENFORCE_LE_INT_MAX(max_seqlen_k, "flash_attn max_seqlen_k");
+    int max_seqlen_q_value = static_cast<int>(max_seqlen_q);
+    seqlen_q_rounded = round_multiple(max_seqlen_q_value, kBlockM);
+    seqlen_k_rounded = round_multiple(static_cast<int>(max_seqlen_k), 128);
 
     softmax_lse_dims = unpadded_lse ? std::vector<int64_t>{num_heads, total_q}
                                     : std::vector<int64_t>{
@@ -221,7 +224,7 @@ struct FlashAttnParamsBase {
 
     startend_row_indices_dims = GetAttnSparseMaskDims(
         startend_row_indices ? startend_row_indices.get_ptr() : nullptr,
-        max_seqlen_q);
+        max_seqlen_q_value);
 
     if (startend_row_indices.is_initialized()) {
       PADDLE_ENFORCE_EQ(

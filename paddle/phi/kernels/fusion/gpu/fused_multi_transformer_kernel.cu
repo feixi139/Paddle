@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/api/include/tensor.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/backends/gpu/gpu_device_function.h"
@@ -70,10 +71,15 @@ void FusedMultiTransformerOpKernel(
   // 0. input
   auto *input_x = &x;
   const auto input_x_dims = input_x->dims();
-  int bsz = input_x_dims[0];
-  int seq_len = input_x_dims[1];
-  int dim_embed = input_x_dims[2];
-  int bsz_seq = bsz * seq_len;
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[0], "fused multi transformer bsz");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[1], "fused multi transformer seq_len");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[2],
+                            "fused multi transformer dim_embed");
+  int bsz = static_cast<int>(input_x_dims[0]);
+  int seq_len = static_cast<int>(input_x_dims[1]);
+  int dim_embed = static_cast<int>(input_x_dims[2]);
+  int64_t bsz_seq = static_cast<int64_t>(bsz) * seq_len;
+  PADDLE_ENFORCE_LE_INT_MAX(bsz_seq, "fused multi transformer bsz_seq");
 
   // Optional Bias input for LayerNorm / RMSNorm
   std::vector<const DenseTensor *> ln_biases;
@@ -108,10 +114,6 @@ void FusedMultiTransformerOpKernel(
   }
 
   auto *beam_cache_offset = beam_offset.get_ptr();
-  int beam_size = 1;
-  if (beam_cache_offset) {
-    beam_size = beam_cache_offset->dims()[1];
-  }
 
   DenseTensor d_token_tensor;
   DenseTensor padding_offset_tensor;
@@ -168,7 +170,7 @@ void FusedMultiTransformerOpKernel(
                                      token_num,
                                      dim_embed);
   } else {
-    token_num = bsz_seq;
+    token_num = static_cast<int>(bsz_seq);
     if (token_num == 0) return;
   }
 
@@ -199,17 +201,34 @@ void FusedMultiTransformerOpKernel(
   const auto qkv_w_dims = qkv_weights[0]->dims();
   int num_head, dim_head;
   if (gqa_group_size > 0) {
-    num_head = trans_qkvw ? (qkv_w_dims[0] - 2 * gqa_group_size)
-                          : (qkv_w_dims[1] - 2 * gqa_group_size);
-    dim_head = trans_qkvw ? qkv_w_dims[1] : qkv_w_dims[2];
+    int64_t num_head_dim = trans_qkvw ? (qkv_w_dims[0] - 2 * gqa_group_size)
+                                      : (qkv_w_dims[1] - 2 * gqa_group_size);
+    int64_t head_dim = trans_qkvw ? qkv_w_dims[1] : qkv_w_dims[2];
+    PADDLE_ENFORCE_LE_INT_MAX(num_head_dim, "fused multi transformer num_head");
+    PADDLE_ENFORCE_LE_INT_MAX(head_dim, "fused multi transformer dim_head");
+    num_head = static_cast<int>(num_head_dim);
+    dim_head = static_cast<int>(head_dim);
   } else {
-    num_head = trans_qkvw ? qkv_w_dims[1] : qkv_w_dims[2];
-    dim_head = trans_qkvw ? qkv_w_dims[2] : qkv_w_dims[3];
+    int64_t num_head_dim = trans_qkvw ? qkv_w_dims[1] : qkv_w_dims[2];
+    int64_t head_dim = trans_qkvw ? qkv_w_dims[2] : qkv_w_dims[3];
+    PADDLE_ENFORCE_LE_INT_MAX(num_head_dim, "fused multi transformer num_head");
+    PADDLE_ENFORCE_LE_INT_MAX(head_dim, "fused multi transformer dim_head");
+    num_head = static_cast<int>(num_head_dim);
+    dim_head = static_cast<int>(head_dim);
   }
-  int hidden_size = num_head * dim_head;
-  int output_size = gqa_group_size <= 0
-                        ? 3 * hidden_size
-                        : (num_head + 2 * gqa_group_size) * dim_head;
+  int64_t hidden_size_64 = static_cast<int64_t>(num_head) * dim_head;
+  int64_t qkv_num_head_64 =
+      gqa_group_size <= 0
+          ? num_head
+          : static_cast<int64_t>(num_head) + 2LL * gqa_group_size;
+  int64_t output_size_64 =
+      gqa_group_size <= 0 ? 3 * hidden_size_64 : qkv_num_head_64 * dim_head;
+  PADDLE_ENFORCE_LE_INT_MAX(hidden_size_64,
+                            "fused multi transformer hidden size");
+  PADDLE_ENFORCE_LE_INT_MAX(output_size_64,
+                            "fused multi transformer output size");
+  int hidden_size = static_cast<int>(hidden_size_64);
+  int output_size = static_cast<int>(output_size_64);
   int input_size = dim_embed;
 
   // Set a flag whether need to add Matmul / Layernorm bias.
@@ -221,7 +240,7 @@ void FusedMultiTransformerOpKernel(
 
   DenseTensor qkv_out;
   if (gqa_group_size > 0) {
-    qkv_out.Resize({token_num, num_head + 2 * gqa_group_size, dim_head});
+    qkv_out.Resize({token_num, qkv_num_head_64, dim_head});
   } else {
     qkv_out.Resize({token_num, 3, num_head, dim_head});
   }
@@ -251,7 +270,9 @@ void FusedMultiTransformerOpKernel(
 
   int cache_offset = 0;
   if (pre_caches.size() > 0) {
-    cache_offset = pre_caches[0]->dims()[3];
+    PADDLE_ENFORCE_LE_INT_MAX(pre_caches[0]->dims()[3],
+                              "fused multi transformer cache offset");
+    cache_offset = static_cast<int>(pre_caches[0]->dims()[3]);
   }
 
   auto out_seq_len = seq_len;
@@ -402,7 +423,9 @@ void FusedMultiTransformerOpKernel(
   auto ffn1_weight_dim = ffn1_weights[0]->dims();
   // if quant weight,
   // matmul weight is transposed
-  int dim_ffn = ffn1_weight_dim[1];
+  PADDLE_ENFORCE_LE_INT_MAX(ffn1_weight_dim[1],
+                            "fused multi transformer dim_ffn");
+  int dim_ffn = static_cast<int>(ffn1_weight_dim[1]);
   phi::fusion::FFNHelper<T> ffn1_helper(
       dev_ctx, act_method, token_num, dim_ffn, dim_embed, "None");
 
@@ -549,14 +572,16 @@ void FusedMultiTransformerOpKernel(
     DenseTensor *cache_kv_out = cache_kv ? cache_kv_outs[i] : nullptr;
     int cache_bsz = 0;
     if (cache_kv) {
-      cache_bsz = cache_kv->dims()[1];
+      PADDLE_ENFORCE_LE_INT_MAX(cache_kv->dims()[1],
+                                "fused multi transformer cache batch size");
+      cache_bsz = static_cast<int>(cache_kv->dims()[1]);
     }
 
     if (time_step) {  // generation decoder stage
       if (FLAGS_fused_multi_transformer_op_use_mbfmha) {
         int64_t max_seq_len = cache_kv->dims()[3];
-        // TODO(large-tensor): downstream functors may still use int; guard
-        // until upgraded.
+        PADDLE_ENFORCE_LE_INT_MAX(max_seq_len,
+                                  "fused multi transformer max_seq_len");
 
         phi::fusion::mbfmha<T>(dev_ctx,
                                qkv_out,
@@ -573,7 +598,7 @@ void FusedMultiTransformerOpKernel(
                                bsz,
                                cache_bsz,
                                seq_len,
-                               max_seq_len,
+                               static_cast<int>(max_seq_len),
                                num_head,
                                dim_head,
                                time_step_value,
@@ -587,8 +612,8 @@ void FusedMultiTransformerOpKernel(
       } else {
         // [2, batch_size, num_head, max_seq_len, head_size]
         int64_t max_seq_len = cache_kv->dims()[3];
-        // TODO(large-tensor): downstream functors may still use int; guard
-        // until upgraded.
+        PADDLE_ENFORCE_LE_INT_MAX(max_seq_len,
+                                  "fused multi transformer max_seq_len");
 
         phi::fusion::fmha<T>(dev_ctx,
                              qkv_out,
@@ -603,7 +628,7 @@ void FusedMultiTransformerOpKernel(
                              bsz,
                              cache_bsz,
                              seq_len,
-                             max_seq_len,
+                             static_cast<int>(max_seq_len),
                              num_head,
                              dim_head,
                              time_step_value,
@@ -620,6 +645,13 @@ void FusedMultiTransformerOpKernel(
             "encoder_remove_padding must be True, but got False"));
       }
       if (rotary_emb_dims != 0) {
+        PADDLE_ENFORCE_LE_INT_MAX(
+            rotary_tensor->dims()[3],
+            "fused multi transformer rotary input output len");
+        PADDLE_ENFORCE_LE_INT_MAX(rotary_tensor->dims()[1],
+                                  "fused multi transformer rotary rope bsz");
+        int rotary_seq_len = static_cast<int>(rotary_tensor->dims()[3]);
+        int rotary_batch_size = static_cast<int>(rotary_tensor->dims()[1]);
         if (gqa_group_size <= 0) {
           phi::fusion::rotary_qk_variable(
               dev_ctx,
@@ -633,9 +665,9 @@ void FusedMultiTransformerOpKernel(
               token_num,
               num_head,
               seq_len,
-              rotary_tensor->dims()[3],
+              rotary_seq_len,
               dim_head,
-              rotary_tensor->dims()[1]);
+              rotary_batch_size);
         } else {
           phi::fusion::gqa_rotary_qk_variable(
               dev_ctx,
@@ -649,10 +681,10 @@ void FusedMultiTransformerOpKernel(
               token_num,
               num_head,
               seq_len,
-              rotary_tensor->dims()[3],
+              rotary_seq_len,
               dim_head,
               gqa_group_size,
-              rotary_tensor->dims()[1]);
+              rotary_batch_size);
         }
       }
       if (gqa_group_size <= 0) {
@@ -743,6 +775,8 @@ void FusedMultiTransformerOpKernel(
         const int *sequence_lengths_data =
             sequence_lengths ? sequence_lengths->data<int>()
                              : sequence_lengths_backup.data<int>();
+        PADDLE_ENFORCE_LE_INT_MAX(rotary_tensor->dims()[1],
+                                  "fused multi transformer rotary rope bsz");
         // encoder_remove_padding ? sequence_lengths->data<int>() : nullptr;
         phi::fusion::rotary_qk(dev_ctx,
                                q_transpose_out_data,
@@ -752,7 +786,7 @@ void FusedMultiTransformerOpKernel(
                                rotary_emb_data,
                                sequence_lengths_data,
                                rotary_emb_dims,
-                               rotary_tensor->dims()[1],
+                               static_cast<int>(rotary_tensor->dims()[1]),
                                bsz,
                                num_head,
                                seq_len,
@@ -813,7 +847,7 @@ void FusedMultiTransformerOpKernel(
                                  &mixgemm_workspace,
                                  buf1);
 
-      phi::fusion::AllReduce<T>(*buf1, ring_id, buf1->numel(), dev_ctx);
+      phi::fusion::AllReduce<T>(*buf1, ring_id, dev_ctx);
     } else {
       out_linear_compute.Compute(&fmha_out,
                                  out_linear_weights[i],
@@ -822,7 +856,7 @@ void FusedMultiTransformerOpKernel(
                                  &mixgemm_workspace,
                                  buf0);
 
-      phi::fusion::AllReduce<T>(*buf0, ring_id, buf0->numel(), dev_ctx);
+      phi::fusion::AllReduce<T>(*buf0, ring_id, dev_ctx);
     }
 
     // step5. ln(residual + dropout(input + bias))
@@ -877,9 +911,9 @@ void FusedMultiTransformerOpKernel(
     }
 
     if (pre_layer_norm) {
-      phi::fusion::AllReduce<T>(*buf1, ring_id, buf1->numel(), dev_ctx);
+      phi::fusion::AllReduce<T>(*buf1, ring_id, dev_ctx);
     } else {
-      phi::fusion::AllReduce<T>(*buf0, ring_id, buf0->numel(), dev_ctx);
+      phi::fusion::AllReduce<T>(*buf0, ring_id, dev_ctx);
     }
 
     // step8. residual bias

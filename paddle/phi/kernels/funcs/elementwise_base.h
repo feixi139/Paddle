@@ -17,6 +17,7 @@ limitations under the License. */
 #include "paddle/phi/backends/all_context.h"
 #include "paddle/phi/common/transform.h"
 #include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/empty_kernel.h"
 #include "paddle/phi/kernels/funcs/common_shape.h"
 #include "paddle/phi/kernels/funcs/elementwise_utils.h"
@@ -443,10 +444,13 @@ void ElementwiseCompute(const CPUContext &dev_ctx,
   }
 
   if (post == 1) {
-    functor.RunRowWise(n);
+    PADDLE_ENFORCE_LE_INT_MAX(n, "elementwise row-wise n");
+    functor.RunRowWise(static_cast<int>(n));
     return;
   } else {
-    functor.RunMidWise(n, post);
+    PADDLE_ENFORCE_LE_INT_MAX(n, "elementwise mid-wise n");
+    PADDLE_ENFORCE_LE_INT_MAX(post, "elementwise mid-wise post");
+    functor.RunMidWise(static_cast<int>(n), static_cast<int>(post));
     return;
   }
 }

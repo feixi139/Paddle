@@ -366,7 +366,8 @@ void YoloBoxPostKernel(const Context& dev_ctx,
     boxes_input[i] = boxes_tensor->data<float>();
     auto dims = boxes_tensor->dims();
     for (int j = 0; j < dims.size(); j++) {
-      boxes_input_dims[i].push_back(dims[j]);
+      PADDLE_ENFORCE_LE_INT_MAX(dims[j], "yolo box input dim");
+      boxes_input_dims[i].push_back(static_cast<int32_t>(dims[j]));
     }
   }
   const float* image_shape_data = image_shape.data<float>();

@@ -616,8 +616,10 @@ void Conv1dXPUInferMeta(const MetaTensor& x,
           groups));
 
   std::vector<int64_t> out_shape({in_dims[0], filter_dims[0]});
-  out_shape.push_back(ConvOutSize(in_dims[2],
-                                  filter_dims[2],
+  PADDLE_ENFORCE_LE_INT_MAX(in_dims[2], "conv_xpu input width");
+  PADDLE_ENFORCE_LE_INT_MAX(filter_dims[2], "conv_xpu filter width");
+  out_shape.push_back(ConvOutSize(static_cast<int>(in_dims[2]),
+                                  static_cast<int>(filter_dims[2]),
                                   dilations,
                                   paddings[0],
                                   paddings[1],
@@ -750,8 +752,11 @@ void Conv2dXPUInferMeta(const MetaTensor& x,
     if ((in_dims[i + 2] <= 0 || filter_dims[i + 2] <= 0)) {
       out_shape.push_back(-1);
     } else {
-      out_shape.push_back(ConvOutSize(in_dims[i + 2],
-                                      filter_dims[i + 2],
+      PADDLE_ENFORCE_LE_INT_MAX(in_dims[i + 2], "conv_xpu input spatial dim");
+      PADDLE_ENFORCE_LE_INT_MAX(filter_dims[i + 2],
+                                "conv_xpu filter spatial dim");
+      out_shape.push_back(ConvOutSize(static_cast<int>(in_dims[i + 2]),
+                                      static_cast<int>(filter_dims[i + 2]),
                                       dilations[i],
                                       paddings_vec[i * 2],
                                       paddings_vec[i * 2 + 1],
@@ -838,9 +843,11 @@ void FcXPUInferMeta(const MetaTensor& x,
                     MetaTensor* out_max) {
   std::vector<int> out_shape(in_num_col_dims + 1);
   for (int i = 0; i < in_num_col_dims; i++) {
-    out_shape[i] = x.dims()[i];
+    PADDLE_ENFORCE_LE_INT_MAX(x.dims()[i], "fc_xpu input shape dim");
+    out_shape[i] = static_cast<int>(x.dims()[i]);
   }
-  out_shape[in_num_col_dims] = w.dims()[0];
+  PADDLE_ENFORCE_LE_INT_MAX(w.dims()[0], "fc_xpu weight output dim");
+  out_shape[in_num_col_dims] = static_cast<int>(w.dims()[0]);
   if (act_type == 23 /*phi::backends::xpu::Activation_t::SWISH_GLU*/) {
     out_shape[in_num_col_dims] = out_shape[in_num_col_dims] / 2;
   }
@@ -3213,8 +3220,12 @@ void FusedScaleBiasReluConvBnInferMeta(const MetaTensor& x,
 
   std::vector<int64_t> out_shape({in_dims[0]});
   for (int i = 0; i < static_cast<int>(strides.size()); ++i) {
-    out_shape.push_back(ConvOutSize(in_dims[i + 1],
-                                    filter_dims[i + 2],
+    PADDLE_ENFORCE_LE_INT_MAX(
+        in_dims[i + 1], "fused_scale_bias_relu_conv_bn input spatial dim");
+    PADDLE_ENFORCE_LE_INT_MAX(
+        filter_dims[i + 2], "fused_scale_bias_relu_conv_bn filter spatial dim");
+    out_shape.push_back(ConvOutSize(static_cast<int>(in_dims[i + 1]),
+                                    static_cast<int>(filter_dims[i + 2]),
                                     dilations[i],
                                     paddings_vec[i * 2],
                                     paddings_vec[i * 2 + 1],

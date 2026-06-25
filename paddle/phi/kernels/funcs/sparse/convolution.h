@@ -15,6 +15,7 @@ limitations under the License. */
 #pragma once
 
 #include "paddle/common/ddim.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/core/kmap_cache.h"
 #include "paddle/phi/core/tensor_utils.h"
 #include "paddle/phi/kernels/empty_kernel.h"
@@ -151,8 +152,10 @@ inline void GetOutShape(const DDim& x_dims,
 inline void ResetSubmKernelSizeAndStrides(const DDim& kernel_dims,
                                           std::vector<int>* paddings,
                                           std::vector<int>* strides) {
-  for (uint64_t i = 0; i < paddings->size(); i++) {
-    (*paddings)[i] = kernel_dims[i] / 2;
+  for (int i = 0; static_cast<size_t>(i) < paddings->size(); i++) {
+    int64_t kernel_dim = kernel_dims[i];
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_dim, "sparse convolution kernel dim");
+    (*paddings)[i] = static_cast<int>(kernel_dim / 2);
     (*strides)[i] = 1;
   }
 }
@@ -187,11 +190,17 @@ inline const IntT* GetRulebookPtr(const SparseCooTensor& coo,
     const auto* indices_pairs = coo.IndicesPairs(key);
     if (indices_pairs != nullptr) {
       const DenseTensor& tmp_rulebook = indices_pairs->first;
-      *rulebook_len = tmp_rulebook.dims()[1];
+      int64_t rulebook_len_64 = tmp_rulebook.dims()[1];
+      PADDLE_ENFORCE_LE_INT_MAX(rulebook_len_64,
+                                "sparse convolution rulebook length");
+      *rulebook_len = static_cast<int>(rulebook_len_64);
       return tmp_rulebook.data<IntT>();
     }
   }
-  *rulebook_len = rulebook.dims()[1];
+  int64_t rulebook_len_64 = rulebook.dims()[1];
+  PADDLE_ENFORCE_LE_INT_MAX(rulebook_len_64,
+                            "sparse convolution rulebook length");
+  *rulebook_len = static_cast<int>(rulebook_len_64);
   return rulebook.data<IntT>();
 }
 
@@ -226,14 +235,18 @@ inline const IntT* PrepareSubm(const Context& dev_ctx,
         counter, indices_pairs->second.data<int>(), counter_size * sizeof(int));
     out->SetIndicesDict(x.GetIndicesDict());
 
-    *rulebook_len = rulebook.dims()[1];
+    int64_t rulebook_len_64 = rulebook.dims()[1];
+    PADDLE_ENFORCE_LE_INT_MAX(rulebook_len_64,
+                              "sparse convolution rulebook length");
+    *rulebook_len = static_cast<int>(rulebook_len_64);
 
     DenseTensor out_indices = EmptyLike<IntT>(dev_ctx, x.non_zero_indices());
     DenseTensor out_values = EmptyLike<T>(dev_ctx, x.non_zero_elements());
     phi::Copy(
         dev_ctx, x.non_zero_indices(), dev_ctx.GetPlace(), false, &out_indices);
     out->SetMember(out_indices, out_values, out_dims, false);
-    PrefixSum<int>(counter, offsets, counter_size);
+    PADDLE_ENFORCE_LE_INT_MAX(counter_size, "sparse convolution counter size");
+    PrefixSum<int>(counter, offsets, static_cast<int>(counter_size));
     return rulebook.data<IntT>();
   }
   return nullptr;

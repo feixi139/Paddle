@@ -293,7 +293,7 @@ struct PermuteDimsSimplifier {
     // valid_map is [0, -1, 1, -1] and generate simplified
     // dims as [32, 10]
     for (auto i = 0; i < rank; ++i) {
-      const int dim_val = combined_dims[i];
+      const int64_t dim_val = combined_dims[i];
       if (dim_val == 1) {
         valid_map[i] = -1;
       } else {

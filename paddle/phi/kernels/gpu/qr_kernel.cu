@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <vector>
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/core/enforce.h"
@@ -76,12 +77,17 @@ struct QrFunctor {
                   DenseTensor* r) {
     auto x_dims = x.dims();
     int x_rank = x_dims.size();
-    int m = x_dims[x_rank - 2];
-    int n = x_dims[x_rank - 1];
+    int64_t m64 = x_dims[x_rank - 2];
+    int64_t n64 = x_dims[x_rank - 1];
+    PADDLE_ENFORCE_LE_INT_MAX(m64, "qr m");
+    PADDLE_ENFORCE_LE_INT_MAX(n64, "qr n");
+    int m = static_cast<int>(m64);
+    int n = static_cast<int>(n64);
     int min_mn = std::min(m, n);
     int k = reduced_mode ? min_mn : m;
-    int64_t batch_size =
-        static_cast<int64_t>(x.numel() / (static_cast<int64_t>(m) * n));
+    int64_t batch_size = x.numel() / (m64 * n64);
+    PADDLE_ENFORCE_LE_INT_MAX(batch_size, "qr batch size");
+    int batch_size_i32 = static_cast<int>(batch_size);
     int64_t qr_stride = static_cast<int64_t>(m) * n;
     int tau_stride = min_mn;
 
@@ -113,8 +119,15 @@ struct QrFunctor {
     auto qr_data = dev_ctx.template Alloc<dtype::Real<T>>(&qr);
     auto tau_data = dev_ctx.template Alloc<dtype::Real<T>>(&tau);
 
-    BatchedGeqrf<Context, T>(
-        dev_ctx, batch_size, m, n, qr_data, m, tau_data, qr_stride, tau_stride);
+    BatchedGeqrf<Context, T>(dev_ctx,
+                             batch_size_i32,
+                             m,
+                             n,
+                             qr_data,
+                             m,
+                             tau_data,
+                             qr_stride,
+                             tau_stride);
 
     if (reduced_mode) {
       auto trans_qr = TransposeLast2Dim<T, Context>(dev_ctx, qr);
@@ -135,7 +148,7 @@ struct QrFunctor {
       // Transpose 'q' to restore the original row-major order
       if (reduced_mode) {
         BatchedOrgqr<Context, T>(dev_ctx,
-                                 batch_size,
+                                 batch_size_i32,
                                  m,
                                  min_mn,
                                  min_mn,
@@ -164,7 +177,7 @@ struct QrFunctor {
                                dev_ctx.stream());
           }
           BatchedOrgqr<Context, T>(dev_ctx,
-                                   batch_size,
+                                   batch_size_i32,
                                    m,
                                    m,
                                    min_mn,
@@ -177,7 +190,7 @@ struct QrFunctor {
           Copy(dev_ctx, trans_q, q->place(), false, q);
         } else {
           BatchedOrgqr<Context, T>(dev_ctx,
-                                   batch_size,
+                                   batch_size_i32,
                                    m,
                                    m,
                                    min_mn,
@@ -206,11 +219,17 @@ struct QrFunctor<dtype::complex<T>, Context> {
                   DenseTensor* r) {
     auto x_dims = x.dims();
     int x_rank = x_dims.size();
-    int m = x_dims[x_rank - 2];
-    int n = x_dims[x_rank - 1];
+    int64_t m64 = x_dims[x_rank - 2];
+    int64_t n64 = x_dims[x_rank - 1];
+    PADDLE_ENFORCE_LE_INT_MAX(m64, "qr m");
+    PADDLE_ENFORCE_LE_INT_MAX(n64, "qr n");
+    int m = static_cast<int>(m64);
+    int n = static_cast<int>(n64);
     int min_mn = std::min(m, n);
     int k = reduced_mode ? min_mn : m;
-    int64_t batch_size = x.numel() / (static_cast<int64_t>(m) * n);
+    int64_t batch_size = x.numel() / (m64 * n64);
+    PADDLE_ENFORCE_LE_INT_MAX(batch_size, "qr batch size");
+    int batch_size_i32 = static_cast<int>(batch_size);
     int64_t qr_stride = static_cast<int64_t>(m) * n;
     int tau_stride = min_mn;
     if (compute_q) {
@@ -238,8 +257,15 @@ struct QrFunctor<dtype::complex<T>, Context> {
     Copy(dev_ctx, tmp_qr, qr.place(), false, &qr);
     auto qr_data = dev_ctx.template Alloc<dtype::complex<T>>(&qr);
     auto tau_data = dev_ctx.template Alloc<dtype::complex<T>>(&tau);
-    BatchedGeqrf<Context, dtype::complex<T>>(
-        dev_ctx, batch_size, m, n, qr_data, m, tau_data, qr_stride, tau_stride);
+    BatchedGeqrf<Context, dtype::complex<T>>(dev_ctx,
+                                             batch_size_i32,
+                                             m,
+                                             n,
+                                             qr_data,
+                                             m,
+                                             tau_data,
+                                             qr_stride,
+                                             tau_stride);
     if (reduced_mode) {
       auto trans_qr =
           TransposeLast2Dim<dtype::complex<T>, Context>(dev_ctx, qr);
@@ -262,7 +288,7 @@ struct QrFunctor<dtype::complex<T>, Context> {
       // Transpose 'q' to restore the original row-major order
       if (reduced_mode) {
         BatchedOrgqr<Context, dtype::complex<T>>(dev_ctx,
-                                                 batch_size,
+                                                 batch_size_i32,
                                                  m,
                                                  min_mn,
                                                  min_mn,
@@ -293,7 +319,7 @@ struct QrFunctor<dtype::complex<T>, Context> {
                                dev_ctx.stream());
           }
           BatchedOrgqr<Context, dtype::complex<T>>(dev_ctx,
-                                                   batch_size,
+                                                   batch_size_i32,
                                                    m,
                                                    m,
                                                    min_mn,
@@ -307,7 +333,7 @@ struct QrFunctor<dtype::complex<T>, Context> {
           Copy(dev_ctx, trans_q, q->place(), false, q);
         } else {
           BatchedOrgqr<Context, dtype::complex<T>>(dev_ctx,
-                                                   batch_size,
+                                                   batch_size_i32,
                                                    m,
                                                    m,
                                                    min_mn,

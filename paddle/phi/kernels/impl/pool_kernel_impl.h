@@ -32,9 +32,10 @@ inline int64_t GetReduceNum(const DenseTensor& input,
                             const bool channel_last,
                             std::vector<int>* reduce_dim) {
   int64_t reduce_num = 0;
-  const int output_height =
+  const int64_t output_height =
       channel_last ? output->dims()[1] : output->dims()[2];
-  const int output_width = channel_last ? output->dims()[2] : output->dims()[3];
+  const int64_t output_width =
+      channel_last ? output->dims()[2] : output->dims()[3];
   if ((output_height == 1) && (output_width == 1)) {
     if (channel_last) {
       reduce_dim->push_back(1);
@@ -244,6 +245,7 @@ void MaxPoolWithIndexRawKernel(const Context& dev_ctx,
   if (global_pooling) {
     for (size_t i = 0; i < kernel_size_.size(); ++i) {
       paddings_[i] = 0;
+      PADDLE_ENFORCE_LE_INT_MAX(x.dims()[i + 2], "max pool kernel size");
       kernel_size_[i] = static_cast<int>(x.dims()[i + 2]);
       dilations_[i] = 1;  // Reset dilation for global pooling
     }

@@ -630,7 +630,9 @@ struct CublasLtBase {
                                  void* workspace_ptr,
                                  size_t workspace_size,
                                  cublasLtMatmulAlgo_t* algo) {
-    int repeats = FLAGS_cublaslt_exhaustive_search_times;
+    PADDLE_ENFORCE_LE_INT_MAX(FLAGS_cublaslt_exhaustive_search_times,
+                              "cublaslt exhaustive search times");
+    int repeats = static_cast<int>(FLAGS_cublaslt_exhaustive_search_times);
     if (repeats <= 0) {
       return std::numeric_limits<float>::max();
     }
@@ -916,7 +918,9 @@ struct CublasLtBase<int8_t, int32_t, MatmulDescriptor> {
                                  void* workspace_ptr,
                                  size_t workspace_size,
                                  cublasLtMatmulAlgo_t* algo) {
-    int repeats = FLAGS_cublaslt_exhaustive_search_times;
+    PADDLE_ENFORCE_LE_INT_MAX(FLAGS_cublaslt_exhaustive_search_times,
+                              "cublaslt exhaustive search times");
+    int repeats = static_cast<int>(FLAGS_cublaslt_exhaustive_search_times);
     if (repeats <= 0) {
       return std::numeric_limits<float>::max();
     }

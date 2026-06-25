@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "paddle/common/enforce.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/core/platform/device/gpu/gpu_resource_pool.h"
 #include "paddle/phi/kernels/fusion/gpu/attention_layer.norm.h"
@@ -72,9 +74,15 @@ void FusedMultiTransformerINT8OpKernel(
   // 0. input
   auto *input_x = &x_in;
   const auto input_x_dims = input_x->dims();
-  int bsz = input_x_dims[0];
-  int seq_len = input_x_dims[1];
-  int dim_embed = input_x_dims[2];
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[0],
+                            "fused multi transformer int8 bsz");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[1],
+                            "fused multi transformer int8 seq_len");
+  PADDLE_ENFORCE_LE_INT_MAX(input_x_dims[2],
+                            "fused multi transformer int8 dim_embed");
+  int bsz = static_cast<int>(input_x_dims[0]);
+  int seq_len = static_cast<int>(input_x_dims[1]);
+  int dim_embed = static_cast<int>(input_x_dims[2]);
   int64_t bsz_seq = static_cast<int64_t>(bsz) * seq_len;
 
   // quant input scales, vector, size = num_layers
@@ -109,8 +117,13 @@ void FusedMultiTransformerINT8OpKernel(
   auto qkv_biases = qkv_bias_in.get();
 
   const auto qkv_w_dims = qkv_weights[0]->dims();
-  int num_head = trans_qkvw ? qkv_w_dims[1] : qkv_w_dims[2];
-  int dim_head = trans_qkvw ? qkv_w_dims[2] : qkv_w_dims[3];
+  int64_t num_head_dim = trans_qkvw ? qkv_w_dims[1] : qkv_w_dims[2];
+  int64_t head_dim = trans_qkvw ? qkv_w_dims[2] : qkv_w_dims[3];
+  PADDLE_ENFORCE_LE_INT_MAX(num_head_dim,
+                            "fused multi transformer int8 num_head");
+  PADDLE_ENFORCE_LE_INT_MAX(head_dim, "fused multi transformer int8 dim_head");
+  int num_head = static_cast<int>(num_head_dim);
+  int dim_head = static_cast<int>(head_dim);
   int64_t hidden_size = static_cast<int64_t>(num_head) * dim_head;
   int64_t output_size = 3 * hidden_size;
   int input_size = dim_embed;
@@ -233,7 +246,9 @@ void FusedMultiTransformerINT8OpKernel(
   auto ffn1_biases = ffn1_bias.get();
   auto ffn1_weight_dim = ffn1_weights[0]->dims();
 
-  int dim_ffn = ffn1_weight_dim[0];
+  PADDLE_ENFORCE_LE_INT_MAX(ffn1_weight_dim[0],
+                            "fused multi transformer int8 dim_ffn");
+  int dim_ffn = static_cast<int>(ffn1_weight_dim[0]);
   PADDLE_ENFORCE_LE_INT_MAX(bsz_seq, "bsz_seq");
   fusion::AttnMatmulINT8<T> ffn1_linear_compute(
       dev_ctx, static_cast<int>(bsz_seq), dim_ffn, dim_embed, false);
@@ -387,14 +402,16 @@ void FusedMultiTransformerINT8OpKernel(
 
     int cache_bsz = 0;
     if (cache_kv) {
-      cache_bsz = cache_kv->dims()[1];
+      PADDLE_ENFORCE_LE_INT_MAX(
+          cache_kv->dims()[1], "fused multi transformer int8 cache batch size");
+      cache_bsz = static_cast<int>(cache_kv->dims()[1]);
     }
 
     if (time_step) {  // generation decoder stage
       // [2, batch_size, num_head, max_seq_len, head_size]
       int64_t max_seq_len = cache_kv->dims()[3];
-      // TODO(large-tensor): downstream functors may still use int; guard until
-      // upgraded.
+      PADDLE_ENFORCE_LE_INT_MAX(max_seq_len,
+                                "fused multi transformer int8 max_seq_len");
 
       phi::fusion::fmha<T>(dev_ctx,
                            qkv_out,
@@ -409,7 +426,7 @@ void FusedMultiTransformerINT8OpKernel(
                            bsz,
                            cache_bsz,
                            seq_len,
-                           max_seq_len,
+                           static_cast<int>(max_seq_len),
                            num_head,
                            dim_head,
                            time_step->data<int>()[0],
@@ -440,11 +457,12 @@ void FusedMultiTransformerINT8OpKernel(
 
       // [2, bsz, num_head, max_seq_len, head_dim]
       int64_t max_seq_len = cache_kv_out->dims()[3];
-      // TODO(large-tensor): downstream functors may still use int; guard until
-      // upgraded.
+      PADDLE_ENFORCE_LE_INT_MAX(max_seq_len,
+                                "fused multi transformer int8 max_seq_len");
 
       T *cache_kv_data = cache_kv_out->data<T>();
-      int64_t cache_k_size = bsz * num_head * max_seq_len * dim_head;
+      int64_t cache_k_size =
+          static_cast<int64_t>(bsz) * num_head * max_seq_len * dim_head;
 
       T *cache_k_ptr = cache_kv_data;
       T *cache_v_ptr = cache_kv_data + cache_k_size;
@@ -457,7 +475,7 @@ void FusedMultiTransformerINT8OpKernel(
                                      bsz,
                                      num_head,
                                      seq_len,
-                                     max_seq_len,
+                                     static_cast<int>(max_seq_len),
                                      dim_head);
     } else {  // not generation
       // TODO(wangxi): can remove dropout in inference
@@ -486,11 +504,7 @@ void FusedMultiTransformerINT8OpKernel(
                                                quant_round_type,
                                                quant_max_bound,
                                                quant_min_bound);
-      phi::fusion::AllReduce<int32_t>(
-          output_workspace,
-          ring_id,
-          static_cast<int64_t>(bsz) * seq_len * num_head * dim_head,
-          dev_ctx);
+      phi::fusion::AllReduce<int32_t>(output_workspace, ring_id, dev_ctx);
     } else {
       out_linear_compute.ComputeForward(out_linear_weights[i],
                                         &fmha_out,
@@ -504,7 +518,11 @@ void FusedMultiTransformerINT8OpKernel(
                                         quant_round_type,
                                         quant_max_bound,
                                         quant_min_bound);
-      phi::fusion::AllReduce<T>(*buf0, ring_id, buf0->numel(), dev_ctx);
+      int64_t buf0_numel = buf0->numel();
+      PADDLE_ENFORCE_LE_INT_MAX(buf0_numel,
+                                "fused multi transformer int8 allreduce numel");
+      phi::fusion::AllReduce<T>(
+          *buf0, ring_id, static_cast<int>(buf0_numel), dev_ctx);
     }
 
     // step5. ln(residual + dropout(input + bias))
@@ -627,13 +645,9 @@ void FusedMultiTransformerINT8OpKernel(
     }
 
     if (pre_layer_norm) {
-      phi::fusion::AllReduce<int32_t>(
-          output_workspace,
-          ring_id,
-          static_cast<int64_t>(bsz) * seq_len * num_head * dim_head,
-          dev_ctx);
+      phi::fusion::AllReduce<int32_t>(output_workspace, ring_id, dev_ctx);
     } else {
-      phi::fusion::AllReduce<T>(*buf0, ring_id, buf0->numel(), dev_ctx);
+      phi::fusion::AllReduce<T>(*buf0, ring_id, dev_ctx);
     }
 
     // step9. residual bias

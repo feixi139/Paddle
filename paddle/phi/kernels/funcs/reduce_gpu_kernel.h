@@ -485,7 +485,11 @@ ReduceConfig SetReduceConfig(const DenseTensorIterator& iter) {
   int64_t inputs_per_output = iter.numel() / num_outputs;
   int input_index = iter.ntensors() - 1;
 
-  auto config = ReduceConfig(sizeof(MPType), num_outputs, inputs_per_output);
+  PADDLE_ENFORCE_LE_INT_MAX(num_outputs, "reduce num outputs");
+  PADDLE_ENFORCE_LE_INT_MAX(inputs_per_output, "reduce inputs per output");
+  auto config = ReduceConfig(sizeof(MPType),
+                             static_cast<int>(num_outputs),
+                             static_cast<int>(inputs_per_output));
 
   int64_t dim0;
   int64_t dim1;
@@ -669,10 +673,10 @@ struct ReduceExecutor {
                  void* acc_buf,
                  void* cta_buf,
                  int* semaphores,
-                 int base_idx,
+                 int64_t base_idx,
                  bool accumulate,
                  bool final_output,
-                 int64_t noutputs)
+                 int noutputs)
       : reducer(reducer),
         config(config),
         ident(ident),
@@ -1298,6 +1302,8 @@ inline void GPUReduceScheduler(const KPDevice& dev_ctx,
       reinterpret_cast<const char*>(iter.data_ptr(iter.ntensors() - 1));
   char* out_data = reinterpret_cast<char*>(iter.data_ptr(0));
   const auto noutputs = iter.noutputs();
+  PADDLE_ENFORCE_LE_INT_MAX(noutputs, "reduce noutputs");
+  int noutputs_int = static_cast<int>(noutputs);
 
   std::optional<char*> out_data_extra;
   if (noutputs > 1) {
@@ -1348,7 +1354,7 @@ inline void GPUReduceScheduler(const KPDevice& dev_ctx,
       base_idx,
       should_accumulate,
       is_final_output,
-      noutputs);
+      noutputs_int);
 
   LaunchReduceKernel<MaxThreadsConfig<Tx>::MAX_NUM_THREADS>(
       dev_ctx, config, reduce);

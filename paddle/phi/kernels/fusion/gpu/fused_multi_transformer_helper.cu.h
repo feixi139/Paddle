@@ -226,6 +226,8 @@ class NormHelper {
       const T *norm_weight_data =
           norm_weight ? norm_weight->data<T>() : nullptr;
       const T *norm_bias_data = norm_bias ? norm_bias->data<T>() : nullptr;
+      PADDLE_ENFORCE_LE_INT_MAX(rows_, "fused multi transformer rmsnorm rows");
+      PADDLE_ENFORCE_LE_INT_MAX(cols_, "fused multi transformer rmsnorm cols");
       phi::ResidualAddRmsNormWrapper<T, GPUContext>(dev_ctx_,
                                                     x_data,
                                                     residual_data,
@@ -233,8 +235,8 @@ class NormHelper {
                                                     norm_weight_data,
                                                     norm_bias_data,
                                                     epsilon_,
-                                                    rows_,
-                                                    cols_,
+                                                    static_cast<int>(rows_),
+                                                    static_cast<int>(cols_),
                                                     bias_residual_out_data,
                                                     output_data);
     } else {
@@ -271,13 +273,15 @@ class NormHelper {
       const T *norm_weight_data =
           norm_weight ? norm_weight->data<T>() : nullptr;
       const T *norm_bias_data = norm_bias ? norm_bias->data<T>() : nullptr;
+      PADDLE_ENFORCE_LE_INT_MAX(rows_, "fused multi transformer rmsnorm rows");
+      PADDLE_ENFORCE_LE_INT_MAX(cols_, "fused multi transformer rmsnorm cols");
       phi::RmsNormWrapper<T, GPUContext>(dev_ctx_,
                                          x_data,
                                          norm_weight_data,
                                          norm_bias_data,
                                          epsilon_,
-                                         rows_,
-                                         cols_,
+                                         static_cast<int>(rows_),
+                                         static_cast<int>(cols_),
                                          output_data);
     } else {
       PADDLE_THROW(common::errors::Unimplemented(

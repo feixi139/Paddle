@@ -20,6 +20,7 @@ limitations under the License. */
 #include <string>
 #include <unordered_map>
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/api/include/context_pool.h"
 #include "paddle/phi/backends/dynload/cublasLt.h"
 #include "paddle/phi/backends/gpu/gpu_info.h"
@@ -28,6 +29,7 @@ limitations under the License. */
 #include "paddle/phi/common/place.h"
 #include "paddle/phi/core/allocator.h"
 #include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/enforce.h"
 #include "paddle/phi/kernels/funcs/blas/blaslt_gemm_search.h"
 
 namespace phi {
@@ -308,11 +310,18 @@ void cublaslt_fp8_fp8_fp16_gemm(
                         y.dims().size()));
 
   int rank = x.dims().size();
-  int m = transpose_x ? x.dims()[rank - 1] : x.dims()[rank - 2];
-  int n = transpose_y ? y.dims()[rank - 2] : y.dims()[rank - 1];
-  int k = transpose_x ? x.dims()[rank - 2] : x.dims()[rank - 1];
-
-  int y_k = transpose_y ? y.dims()[rank - 1] : y.dims()[rank - 2];
+  int64_t m64 = transpose_x ? x.dims()[rank - 1] : x.dims()[rank - 2];
+  int64_t n64 = transpose_y ? y.dims()[rank - 2] : y.dims()[rank - 1];
+  int64_t k64 = transpose_x ? x.dims()[rank - 2] : x.dims()[rank - 1];
+  int64_t y_k64 = transpose_y ? y.dims()[rank - 1] : y.dims()[rank - 2];
+  PADDLE_ENFORCE_LE_INT_MAX(m64, "fp8 gemm m");
+  PADDLE_ENFORCE_LE_INT_MAX(n64, "fp8 gemm n");
+  PADDLE_ENFORCE_LE_INT_MAX(k64, "fp8 gemm k");
+  PADDLE_ENFORCE_LE_INT_MAX(y_k64, "fp8 gemm y k");
+  int m = static_cast<int>(m64);
+  int n = static_cast<int>(n64);
+  int k = static_cast<int>(k64);
+  int y_k = static_cast<int>(y_k64);
   PADDLE_ENFORCE_EQ(
       k == y_k,
       true,
@@ -337,10 +346,12 @@ void cublaslt_fp8_fp8_fp16_gemm(
                         "FP8 gemm need k % 16 = 0, but k = %d", k));
 
   dev_ctx.template Alloc<phi::float16>(out);
-  int batch_count = 1;
+  int64_t batch_count64 = 1;
   for (size_t i = 0; i < rank - 2; ++i) {
-    batch_count *= x.dims()[i];
+    batch_count64 *= x.dims()[i];
   }
+  PADDLE_ENFORCE_LE_INT_MAX(batch_count64, "fp8 gemm batch count");
+  int batch_count = static_cast<int>(batch_count64);
   CublasLtMatmulFP8<phi::float16>(
       dev_ctx, batch_count, m, n, k, x, y, scale, bias, activation_type, out);
 }
@@ -365,11 +376,18 @@ void cublaslt_fp8_fp8_bf16_gemm(
                         y.dims().size()));
 
   int rank = x.dims().size();
-  int m = transpose_x ? x.dims()[rank - 1] : x.dims()[rank - 2];
-  int n = transpose_y ? y.dims()[rank - 2] : y.dims()[rank - 1];
-  int k = transpose_x ? x.dims()[rank - 2] : x.dims()[rank - 1];
-
-  int y_k = transpose_y ? y.dims()[rank - 1] : y.dims()[rank - 2];
+  int64_t m64 = transpose_x ? x.dims()[rank - 1] : x.dims()[rank - 2];
+  int64_t n64 = transpose_y ? y.dims()[rank - 2] : y.dims()[rank - 1];
+  int64_t k64 = transpose_x ? x.dims()[rank - 2] : x.dims()[rank - 1];
+  int64_t y_k64 = transpose_y ? y.dims()[rank - 1] : y.dims()[rank - 2];
+  PADDLE_ENFORCE_LE_INT_MAX(m64, "fp8 gemm m");
+  PADDLE_ENFORCE_LE_INT_MAX(n64, "fp8 gemm n");
+  PADDLE_ENFORCE_LE_INT_MAX(k64, "fp8 gemm k");
+  PADDLE_ENFORCE_LE_INT_MAX(y_k64, "fp8 gemm y k");
+  int m = static_cast<int>(m64);
+  int n = static_cast<int>(n64);
+  int k = static_cast<int>(k64);
+  int y_k = static_cast<int>(y_k64);
   PADDLE_ENFORCE_EQ(
       k == y_k,
       true,
@@ -394,10 +412,12 @@ void cublaslt_fp8_fp8_bf16_gemm(
                         "FP8 gemm need k % 16 = 0, but k = %d", k));
 
   dev_ctx.template Alloc<phi::bfloat16>(out);
-  int batch_count = 1;
+  int64_t batch_count64 = 1;
   for (size_t i = 0; i < rank - 2; ++i) {
-    batch_count *= x.dims()[i];
+    batch_count64 *= x.dims()[i];
   }
+  PADDLE_ENFORCE_LE_INT_MAX(batch_count64, "fp8 gemm batch count");
+  int batch_count = static_cast<int>(batch_count64);
   CublasLtMatmulFP8<phi::bfloat16>(
       dev_ctx, batch_count, m, n, k, x, y, scale, bias, activation_type, out);
 }
