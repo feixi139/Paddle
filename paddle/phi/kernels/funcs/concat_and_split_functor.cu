@@ -14,8 +14,11 @@ limitations under the License. */
 
 #include "paddle/phi/kernels/funcs/concat_and_split_functor.h"
 
+#include <type_traits>
+
 #include "glog/logging.h"
 
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_launch_config.h"
 #include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/common/place.h"
@@ -560,27 +563,43 @@ void ConcatFunctorWithIndexType(const GPUContext& dev_ctx,
                                 int axis,
                                 DenseTensor* output) {
   // TODO(zcd): Add input data validity checking
-  IndexT in_num = ins.size();
-  IndexT in_row = 1;
+  int64_t in_num64 = static_cast<int64_t>(ins.size());
+  int64_t in_row64 = 1;
   auto dim_0 = ins[0].dims();
   for (int i = 0; i < axis; ++i) {
-    in_row *= dim_0[i];
+    in_row64 *= dim_0[i];
   }
-  IndexT in_col = ins[0].numel() / in_row;
+  int64_t in_col64 = ins[0].numel() / in_row64;
+  if constexpr (std::is_same_v<IndexT, int32_t>) {
+    PADDLE_ENFORCE_LE_INT_MAX(in_num64, "concat input size");
+    PADDLE_ENFORCE_LE_INT_MAX(in_row64, "concat input rows");
+    PADDLE_ENFORCE_LE_INT_MAX(in_col64, "concat input cols");
+  }
+  int64_t inputs_col_num64 = in_num64 + 1;
+  if constexpr (std::is_same_v<IndexT, int32_t>) {
+    PADDLE_ENFORCE_LE_INT_MAX(inputs_col_num64, "concat input cols num");
+  }
+  IndexT in_num = static_cast<IndexT>(in_num64);
+  IndexT in_row = static_cast<IndexT>(in_row64);
+  IndexT in_col = static_cast<IndexT>(in_col64);
   IndexT out_row = in_row, out_col = 0;
 
-  IndexT inputs_col_num = in_num + 1;
-  std::vector<const T*> inputs_data_vec(in_num, nullptr);
+  IndexT inputs_col_num = static_cast<IndexT>(inputs_col_num64);
+  std::vector<const T*> inputs_data_vec(static_cast<size_t>(in_num), nullptr);
   for (size_t i = 0; i < ins.size(); ++i) {
     inputs_data_vec[i] = ins[i].data<T>();
   }
-  std::vector<IndexT> inputs_col_vec(inputs_col_num, 0);
+  std::vector<IndexT> inputs_col_vec(static_cast<size_t>(inputs_col_num), 0);
   const T** inputs_data = inputs_data_vec.data();
   IndexT* inputs_col = inputs_col_vec.data();
 
   bool has_same_shape = true;
-  for (int i = 0; i < in_num; ++i) {
-    IndexT t_cols = ins[i].numel() / in_row;
+  for (IndexT i = 0; i < in_num; ++i) {
+    int64_t t_cols64 = ins[static_cast<size_t>(i)].numel() / in_row64;
+    if constexpr (std::is_same_v<IndexT, int32_t>) {
+      PADDLE_ENFORCE_LE_INT_MAX(t_cols64, "concat input cols");
+    }
+    IndexT t_cols = static_cast<IndexT>(t_cols64);
     if (has_same_shape) {
       has_same_shape &= (t_cols == in_col);
     }
@@ -745,31 +764,50 @@ void SplitFunctorDispatchWithIndexType(
     const std::vector<const DenseTensor*>& ref_ins,
     std::vector<DenseTensor*>* outs) {
   // TODO(zcd): Add input data validity checking
-  int out_num = outs->size();
-  IndexT out_row = 1;
+  int64_t out_num64 = static_cast<int64_t>(outs->size());
+  int64_t out_row64 = 1;
   auto ref_dim = ref_ins[0]->dims();
   for (int i = 0; i < axis; ++i) {
-    out_row *= ref_dim[i];
+    out_row64 *= ref_dim[i];
   }
-  IndexT out_col = ref_ins[0]->numel() / out_row;
+  int64_t out_col64 = ref_ins[0]->numel() / out_row64;
+  if constexpr (std::is_same_v<IndexT, int32_t>) {
+    PADDLE_ENFORCE_LE_INT_MAX(out_num64, "split output size");
+    PADDLE_ENFORCE_LE_INT_MAX(out_row64, "split output rows");
+    PADDLE_ENFORCE_LE_INT_MAX(out_col64, "split output cols");
+  }
+  IndexT out_num = static_cast<IndexT>(out_num64);
+  IndexT out_row = static_cast<IndexT>(out_row64);
+  IndexT out_col = static_cast<IndexT>(out_col64);
   IndexT cumulative_col = 0;
   bool has_same_shape = true;
 
-  int out_cols_num = out_num + 1;
-  std::vector<IndexT> outputs_cols_vec(out_cols_num, 0);
+  int64_t out_cols_num64 = out_num64 + 1;
+  if constexpr (std::is_same_v<IndexT, int32_t>) {
+    PADDLE_ENFORCE_LE_INT_MAX(out_cols_num64, "split output cols num");
+  }
+  IndexT out_cols_num = static_cast<IndexT>(out_cols_num64);
+  std::vector<IndexT> outputs_cols_vec(static_cast<size_t>(out_cols_num), 0);
   IndexT* outs_cols = outputs_cols_vec.data();
   T** outs_data = nullptr;
 
   outs_cols[0] = 0;
-  for (int i = 0; i < out_num; ++i) {
-    IndexT t_col = ref_ins.at(i)->numel() / out_row;
+  for (IndexT i = 0; i < out_num; ++i) {
+    int64_t t_col64 = ref_ins.at(static_cast<size_t>(i))->numel() / out_row64;
+    if constexpr (std::is_same_v<IndexT, int32_t>) {
+      PADDLE_ENFORCE_LE_INT_MAX(t_col64, "split output cols");
+    }
+    IndexT t_col = static_cast<IndexT>(t_col64);
     if (has_same_shape) {
       has_same_shape &= (t_col == cumulative_col);
     }
     cumulative_col += t_col;
     outs_cols[i + 1] = cumulative_col;
   }
-  int limit_num = has_same_shape ? out_num : out_cols_num;
+  int64_t limit_num64 =
+      static_cast<int64_t>(has_same_shape ? out_num : out_cols_num);
+  PADDLE_ENFORCE_LE_INT_MAX(limit_num64, "split limit num");
+  int limit_num = static_cast<int>(limit_num64);
   if (has_same_shape) {
     switch (funcs::CalcArraySize(limit_num)) {
       SEGMENTED_ARRAY_KERNEL_HELPER(

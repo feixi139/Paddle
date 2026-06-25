@@ -16,9 +16,11 @@ limitations under the License. */
 #include <glog/logging.h>
 #include <cstring>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
 
 #include "paddle/common/ddim.h"
+#include "paddle/common/enforce.h"
 #include "paddle/phi/common/place.h"
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
@@ -221,35 +223,39 @@ void ScatterAssignAdd(const CPUContext& dev_ctx,
   const size_t& slice_bytes = slice_size * sizeof(T);
 
   // if not in overwrite mode, need to init output data
-  auto max_index = dst_dims[0];
+  int64_t max_index = dst_dims[0];
+  if constexpr (std::is_same_v<IndexT, int>) {
+    PADDLE_ENFORCE_LE_INT_MAX(max_index, "scatter max index");
+  }
+  IndexT max_index_value = static_cast<IndexT>(max_index);
   for (int64_t i = 0; i < index_size; ++i) {
     PADDLE_ENFORCE_GE(p_index[i],
-                      -max_index,
+                      -max_index_value,
                       common::errors::OutOfRange(
                           "The index is out of bounds, "
                           "please check whether the dimensions of index and "
                           "input meet the requirements. It should "
                           "be greater than or equal to [%d], but received [%d]",
-                          -max_index,
+                          -max_index_value,
                           p_index[i]));
     PADDLE_ENFORCE_LT(p_index[i],
-                      max_index,
+                      max_index_value,
                       common::errors::OutOfRange(
                           "The index is out of bounds, "
                           "please check whether the dimensions of index and "
                           "input meet the requirements. It should "
                           "be less than [%d], but received [%d]",
-                          max_index,
+                          max_index_value,
                           p_index[i]));
-    const IndexT& index_val =
-        (p_index[i] < 0 ? p_index[i] + max_index : p_index[i]);
+    IndexT index_val =
+        (p_index[i] < 0 ? p_index[i] + max_index_value : p_index[i]);
     memset(p_output + slice_size * index_val, 0, slice_bytes);
   }
 
   // if not in overwrite mode, need to init output data
   for (int64_t i = 0; i < index_size; ++i) {
-    const IndexT& index_val =
-        (p_index[i] < 0 ? p_index[i] + max_index : p_index[i]);
+    IndexT index_val =
+        (p_index[i] < 0 ? p_index[i] + max_index_value : p_index[i]);
     elementwise_inner_add<T, IndexT>(
         dev_ctx, p_src, p_output, i, index_val, slice_size);
   }
@@ -273,10 +279,13 @@ void CPUScatterGradForX(const CPUContext& dev_ctx UNUSED,
   size_t slice_size = 1;
   for (int i = 1; i < dst_dims.size(); ++i) slice_size *= dst_dims[i];
   const size_t slice_bytes = slice_size * sizeof(T);
-  auto dim_size = dst_dims[0];
+  int64_t dim_size = dst_dims[0];
+  if constexpr (std::is_same_v<IndexT, int>) {
+    PADDLE_ENFORCE_LE_INT_MAX(dim_size, "scatter grad dim size");
+  }
+  IndexT dim_size_value = static_cast<IndexT>(dim_size);
   for (int64_t i = 0; i < index_size; ++i) {
-    const IndexT& index_ =
-        (p_index[i] < 0 ? p_index[i] + dim_size : p_index[i]);
+    IndexT index_ = (p_index[i] < 0 ? p_index[i] + dim_size_value : p_index[i]);
     memset(p_output + slice_size * index_, 0, slice_bytes);
   }
 }
@@ -312,9 +321,14 @@ void ScatterNdAdd(const CPUContext& dev_ctx,
     IndexT index_val = 0;
     IndexT temp = 1;
     for (int64_t j = end_size - 1; j >= 0; --j) {
+      int64_t output_dim = output_dims[j];
+      if constexpr (std::is_same_v<IndexT, int>) {
+        PADDLE_ENFORCE_LE_INT_MAX(output_dim, "scatter_nd output dim");
+      }
+      IndexT output_dim_value = static_cast<IndexT>(output_dim);
       IndexT index_value = p_index[i * end_size + j];
       PADDLE_ENFORCE_EQ(
-          (index_value >= -output_dims[j] && index_value < output_dims[j]),
+          (index_value >= -output_dim_value && index_value < output_dim_value),
           true,
           common::errors::OutOfRange(
               "The index is out of bounds, "
@@ -322,15 +336,15 @@ void ScatterNdAdd(const CPUContext& dev_ctx,
               "input meet the requirements. It should "
               "be less than [%d] and greater or equal to [%d], "
               "but received [%d]",
-              output_dims[j],
-              -output_dims[j],
+              output_dim_value,
+              -output_dim_value,
               index_value));
       if (index_value < 0) {
-        index_value += output_dims[j];
+        index_value += output_dim_value;
       }
 
       index_val += (index_value * temp);
-      temp *= output_dims[j];
+      temp *= output_dim_value;
     }
     elementwise_inner_add<T, IndexT>(
         dev_ctx, p_update, p_output, i, index_val, slice_size);

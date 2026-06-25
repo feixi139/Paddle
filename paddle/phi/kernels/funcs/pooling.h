@@ -16,12 +16,14 @@ limitations under the License. */
 
 #include <algorithm>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "paddle/common/hostdevice.h"
 #include "paddle/common/macros.h"  // import FLT_MAX
 #include "paddle/phi/common/amp_type_traits.h"
 #include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/enforce.h"
 
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
 #include "paddle/phi/backends/gpu/gpu_decls.h"
@@ -532,10 +534,14 @@ inline void UpdatePadding(std::vector<T>* paddings,
   // when padding_algorithm is "VALID" or "SAME"
   if (padding_algorithm == "SAME") {
     for (int i = 0; i < data_dims.size(); ++i) {
-      T out_size = (data_dims[i] + strides[i] - 1) / strides[i];
-      T pad_sum =
-          std::max((out_size - 1) * strides[i] + kernel_size[i] - data_shape[i],
-                   static_cast<T>(0));
+      int64_t out_size = (data_dims[i] + strides[i] - 1) / strides[i];
+      if constexpr (std::is_same_v<T, int>) {
+        PADDLE_ENFORCE_LE_INT_MAX(out_size, "pooling out size");
+      }
+      T output_size = static_cast<T>(out_size);
+      T pad_sum = std::max(
+          (output_size - 1) * strides[i] + kernel_size[i] - data_shape[i],
+          static_cast<T>(0));
       T pad_0 = pad_sum / 2;
       T pad_1 = pad_sum - pad_0;
       *(paddings->begin() + i * 2) = pad_0;
@@ -559,7 +565,10 @@ template <typename T = int>
 inline void UpdateKernelSize(std::vector<T>* kernel_size,
                              const DDim data_dims) {
   kernel_size->resize(static_cast<size_t>(data_dims.size()));
-  for (size_t i = 0; i < kernel_size->size(); ++i) {
+  for (int i = 0; i < data_dims.size(); ++i) {
+    if constexpr (std::is_same_v<T, int>) {
+      PADDLE_ENFORCE_LE_INT_MAX(data_dims[i], "pooling kernel size");
+    }
     *(kernel_size->begin() + i) = static_cast<T>(data_dims[i]);
   }
 }

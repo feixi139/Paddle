@@ -14,6 +14,9 @@
 
 #include "paddle/phi/kernels/deformable_conv_grad_kernel.h"
 
+#include <type_traits>
+
+#include "paddle/common/enforce.h"
 #include "paddle/phi/backends/cpu/cpu_context.h"
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/impl/deformable_conv_grad_kernel_impl.h"
@@ -117,19 +120,43 @@ void ModulatedDeformableCol2im(const Context& dev_ctx,
                                const std::vector<int>& dilation,
                                const int deformable_group,
                                T* grad_im) {
-  int64_t channel_per_deformable_group = im_shape[0] / deformable_group;
-  int64_t num_kernels =
+  int64_t channel_per_deformable_group64 = im_shape[0] / deformable_group;
+  int64_t num_kernels64 =
       col_shape[0] * col_shape[1] * col_shape[2] * col_shape[3];
+  if constexpr (std::is_same_v<IndexT, int>) {
+    PADDLE_ENFORCE_LE_INT_MAX(num_kernels64, "deformable col2im num kernels");
+    PADDLE_ENFORCE_LE_INT_MAX(im_shape[0], "deformable col2im channels");
+    PADDLE_ENFORCE_LE_INT_MAX(im_shape[1], "deformable col2im height");
+    PADDLE_ENFORCE_LE_INT_MAX(im_shape[2], "deformable col2im width");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_shape[2], "deformable col2im kernel_h");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_shape[3], "deformable col2im kernel_w");
+    PADDLE_ENFORCE_LE_INT_MAX(channel_per_deformable_group64,
+                              "deformable col2im channel group");
+    PADDLE_ENFORCE_LE_INT_MAX(col_shape[1], "deformable col2im batch size");
+    PADDLE_ENFORCE_LE_INT_MAX(col_shape[2], "deformable col2im height col");
+    PADDLE_ENFORCE_LE_INT_MAX(col_shape[3], "deformable col2im width col");
+  }
+  IndexT num_kernels = static_cast<IndexT>(num_kernels64);
+  IndexT channels = static_cast<IndexT>(im_shape[0]);
+  IndexT height = static_cast<IndexT>(im_shape[1]);
+  IndexT width = static_cast<IndexT>(im_shape[2]);
+  IndexT kernel_h = static_cast<IndexT>(kernel_shape[2]);
+  IndexT kernel_w = static_cast<IndexT>(kernel_shape[3]);
+  IndexT channel_per_deformable_group =
+      static_cast<IndexT>(channel_per_deformable_group64);
+  IndexT batch_size = static_cast<IndexT>(col_shape[1]);
+  IndexT height_col = static_cast<IndexT>(col_shape[2]);
+  IndexT width_col = static_cast<IndexT>(col_shape[3]);
 
   ModulatedDeformableCol2imCPUKernel<T, IndexT>(num_kernels,
                                                 data_col,
                                                 data_offset,
                                                 data_mask,
-                                                im_shape[0],
-                                                im_shape[1],
-                                                im_shape[2],
-                                                kernel_shape[2],
-                                                kernel_shape[3],
+                                                channels,
+                                                height,
+                                                width,
+                                                kernel_h,
+                                                kernel_w,
                                                 pad[0],
                                                 pad[1],
                                                 stride[0],
@@ -137,10 +164,10 @@ void ModulatedDeformableCol2im(const Context& dev_ctx,
                                                 dilation[0],
                                                 dilation[1],
                                                 channel_per_deformable_group,
-                                                col_shape[1],
+                                                batch_size,
                                                 deformable_group,
-                                                col_shape[2],
-                                                col_shape[3],
+                                                height_col,
+                                                width_col,
                                                 grad_im);
 }
 
@@ -277,9 +304,44 @@ void ModulatedDeformableCol2imCoord(const Context& dev_ctx,
                                     const int deformable_groups,
                                     T* grad_offset,
                                     T* grad_mask) {
-  int64_t num_kernels = 2 * kernel_shape[2] * kernel_shape[3] * col_shape[1] *
-                        col_shape[2] * col_shape[3] * deformable_groups;
-  int64_t channel_per_deformable_group = col_shape[0] / deformable_groups;
+  int64_t num_kernels64 = 2 * kernel_shape[2] * kernel_shape[3] * col_shape[1] *
+                          col_shape[2] * col_shape[3] * deformable_groups;
+  int64_t channel_per_deformable_group64 = col_shape[0] / deformable_groups;
+  int64_t offset_channels64 =
+      2 * kernel_shape[2] * kernel_shape[3] * deformable_groups;
+  if constexpr (std::is_same_v<IndexT, int>) {
+    PADDLE_ENFORCE_LE_INT_MAX(num_kernels64,
+                              "deformable col2im coord num kernels");
+    PADDLE_ENFORCE_LE_INT_MAX(im_shape[0], "deformable col2im coord channels");
+    PADDLE_ENFORCE_LE_INT_MAX(im_shape[1], "deformable col2im coord height");
+    PADDLE_ENFORCE_LE_INT_MAX(im_shape[2], "deformable col2im coord width");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_shape[2],
+                              "deformable col2im coord kernel_h");
+    PADDLE_ENFORCE_LE_INT_MAX(kernel_shape[3],
+                              "deformable col2im coord kernel_w");
+    PADDLE_ENFORCE_LE_INT_MAX(channel_per_deformable_group64,
+                              "deformable col2im coord channel group");
+    PADDLE_ENFORCE_LE_INT_MAX(col_shape[1],
+                              "deformable col2im coord batch size");
+    PADDLE_ENFORCE_LE_INT_MAX(offset_channels64,
+                              "deformable col2im coord offset channels");
+    PADDLE_ENFORCE_LE_INT_MAX(col_shape[2],
+                              "deformable col2im coord height col");
+    PADDLE_ENFORCE_LE_INT_MAX(col_shape[3],
+                              "deformable col2im coord width col");
+  }
+  IndexT num_kernels = static_cast<IndexT>(num_kernels64);
+  IndexT channels = static_cast<IndexT>(im_shape[0]);
+  IndexT height = static_cast<IndexT>(im_shape[1]);
+  IndexT width = static_cast<IndexT>(im_shape[2]);
+  IndexT kernel_h = static_cast<IndexT>(kernel_shape[2]);
+  IndexT kernel_w = static_cast<IndexT>(kernel_shape[3]);
+  IndexT channel_per_deformable_group =
+      static_cast<IndexT>(channel_per_deformable_group64);
+  IndexT batch_size = static_cast<IndexT>(col_shape[1]);
+  IndexT offset_channels = static_cast<IndexT>(offset_channels64);
+  IndexT height_col = static_cast<IndexT>(col_shape[2]);
+  IndexT width_col = static_cast<IndexT>(col_shape[3]);
 
   ModulatedDeformableCol2imCoordCPUKernel<T, IndexT>(
       num_kernels,
@@ -287,11 +349,11 @@ void ModulatedDeformableCol2imCoord(const Context& dev_ctx,
       data_im,
       data_offset,
       data_mask,
-      im_shape[0],
-      im_shape[1],
-      im_shape[2],
-      kernel_shape[2],
-      kernel_shape[3],
+      channels,
+      height,
+      width,
+      kernel_h,
+      kernel_w,
       paddings[0],
       paddings[1],
       strides[0],
@@ -299,11 +361,11 @@ void ModulatedDeformableCol2imCoord(const Context& dev_ctx,
       dilations[0],
       dilations[1],
       channel_per_deformable_group,
-      col_shape[1],
-      2 * kernel_shape[2] * kernel_shape[3] * deformable_groups,
+      batch_size,
+      offset_channels,
       deformable_groups,
-      col_shape[2],
-      col_shape[3],
+      height_col,
+      width_col,
       grad_offset,
       grad_mask);
 }

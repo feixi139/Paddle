@@ -158,11 +158,22 @@ struct OffsetCalculator {
         common::errors::InvalidArgument(
             "Tensor has too many dims. Maximum dim is %d.", MAX_DIMS));
     for (int i = 0; i < dims; i++) {
-      shape_[i] = IntDivider<INDEX_T>(shape[i]);
+      if constexpr (std::is_same_v<INDEX_T, uint32_t>) {
+        PADDLE_ENFORCE_LE_UINT32_MAX(shape[i], "offset calculator shape");
+        shape_[i] = IntDivider<INDEX_T>(static_cast<INDEX_T>(shape[i]));
+      } else {
+        shape_[i] = IntDivider<INDEX_T>(shape[i]);
+      }
       for (int arg = 0; arg < NARGS; arg++) {
         int64_t element_size =
             (element_sizes == nullptr ? 1LL : element_sizes[arg]);
-        strides_[i][arg] = strides[arg][i] / element_size;
+        int64_t stride = strides[arg][i] / element_size;
+        if constexpr (std::is_same_v<stride_t, uint32_t>) {
+          PADDLE_ENFORCE_LE_UINT32_MAX(stride, "offset calculator stride");
+          strides_[i][arg] = static_cast<stride_t>(stride);
+        } else {
+          strides_[i][arg] = stride;
+        }
       }
     }
   }
