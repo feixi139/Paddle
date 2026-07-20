@@ -13,15 +13,29 @@
 // limitations under the License.
 
 #include "paddle/phi/kernels/dot_kernel.h"
-#include "paddle/common/enforce.h"
+
+#include <numeric>
+#include <vector>
+
 #include "paddle/phi/backends/gpu/gpu_context.h"
 #include "paddle/phi/core/kernel_registry.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
-#include "paddle/phi/kernels/funcs/eigen/common.h"
+#include "paddle/phi/core/tensor_utils.h"
 
 #include "paddle/phi/kernels/full_kernel.h"
-#include "paddle/phi/kernels/funcs/eigen/eigen_function.h"
+#include "paddle/phi/kernels/funcs/for_range.h"
+#include "paddle/phi/kernels/reduce_sum_kernel.h"
 namespace phi {
+
+template <typename T>
+struct DotProductFunctor {
+  DotProductFunctor(const T* x, const T* y, T* out) : x_(x), y_(y), out_(out) {}
+
+  HOSTDEVICE void operator()(size_t i) const { out_[i] = x_[i] * y_[i]; }
+
+  const T* x_;
+  const T* y_;
+  T* out_;
+};
 
 template <typename T, typename Context>
 void DotKernel(const Context& dev_ctx,
@@ -36,48 +50,26 @@ void DotKernel(const Context& dev_ctx,
   if (out->numel() <= 0) {
     return;
   }
-  auto x_data = x.data<T>();
-  auto y_data = y.data<T>();
   dev_ctx.template Alloc<T>(out);
-  auto out_data = out->data<T>();
+  DenseTensor product;
+  product.Resize(x.dims());
+  dev_ctx.template Alloc<T>(&product);
+  funcs::ForRange<Context> for_range(dev_ctx, x.numel());
+  for_range(DotProductFunctor<T>(x.data<T>(), y.data<T>(), product.data<T>()));
+
   if (out->dims().size() == 0) {
-#ifdef PADDLE_WITH_CUDA
-    if constexpr (std::is_same_v<T, int> || std::is_same_v<T, int64_t>) {
-      auto eigen_out = EigenScalar<T>::From(*out);
-      auto eigen_x = EigenVector<T>::Flatten(x);
-      auto eigen_y = EigenVector<T>::Flatten(y);
-
-      auto& dev = *dev_ctx.eigen_device();
-      eigen_out.device(dev) = (eigen_x * eigen_y).sum();
-    } else {
-      PADDLE_ENFORCE_LE_INT_MAX(x.numel(), "dot CUDOT n");
-      PADDLE_ENFORCE_LE_INT_MAX(x.strides()[0], "dot CUDOT incx");
-      const int n = static_cast<int>(x.numel());
-      int incx = static_cast<int>(x.strides()[0]);
-      int incy = static_cast<int>(x.strides()[0]);
-      if (n == 1) {
-        incx = 1;
-        incy = 1;
-      }
-
-      auto blas = funcs::GetBlas<GPUContext, T>(dev_ctx);
-      blas.CUDOT(n, x_data, incx, y_data, incy, out_data);
+    if (x.dims().size() == 0) {
+      Copy(dev_ctx, product, dev_ctx.GetPlace(), false, out);
+      return;
     }
-#else
-    auto eigen_out = EigenScalar<T>::From(*out);
-    auto eigen_x = EigenVector<T>::Flatten(x);
-    auto eigen_y = EigenVector<T>::Flatten(y);
-
-    auto& dev = *dev_ctx.eigen_device();
-    eigen_out.device(dev) = (eigen_x * eigen_y).sum();
-#endif
+    std::vector<int64_t> reduce_dims(x.dims().size());
+    std::iota(reduce_dims.begin(), reduce_dims.end(), 0);
+    SumKernel<T, Context>(
+        dev_ctx, product, reduce_dims, out->dtype(), false, out);
   } else {
-    auto eigen_out = EigenVector<T>::From(*out);
-    auto eigen_x = EigenMatrix<T>::From(x);
-    auto eigen_y = EigenMatrix<T>::From(y);
-
-    auto& dev = *dev_ctx.eigen_device();
-    eigen_out.device(dev) = (eigen_x * eigen_y).sum(Eigen::DSizes<int, 1>(1));
+    std::vector<int64_t> reduce_dims{static_cast<int64_t>(x.dims().size() - 1)};
+    SumKernel<T, Context>(
+        dev_ctx, product, reduce_dims, out->dtype(), false, out);
   }
 }
 }  // namespace phi

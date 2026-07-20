@@ -17,9 +17,6 @@ limitations under the License. */
 #include <map>
 #include <unordered_map>
 
-#include "paddle/phi/backends/cpu/cpu_context.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
-
 namespace phi::funcs {
 
 template <typename T>
@@ -139,7 +136,6 @@ struct MatrixBitCodeFunctorMul {
 
   template <typename CodeTable>
   void operator()(const CodeTable &code_table) {
-    auto blas = funcs::GetBlas<CPUContext, T>(CPUContext());
     size_t num_samples = tmat_->dims()[0];
     size_t tmat_width = tmat_->dims()[1];
     size_t input_width = input_.dims()[1];
@@ -154,7 +150,10 @@ struct MatrixBitCodeFunctorMul {
       for (int j = 0; j < code_length; ++j) {
         size_t index = code.calc_index(j);
         const T *weight_row = weight_value + weight_width * index;
-        T sum = blas.DOT(input_width, weight_row, input_row);
+        T sum = static_cast<T>(0);
+        for (size_t k = 0; k < input_width; ++k) {
+          sum += weight_row[k] * input_row[k];
+        }
         tmat_value[i * tmat_width + j] += sum;
       }
     }
@@ -186,7 +185,6 @@ struct MatrixBitCodeFunctorMulGradWeight {
       : tmat_(tmat), weight_(weight), input_(input) {}
   template <typename CodeTable>
   void operator()(const CodeTable &code_table) {
-    auto blas = funcs::GetBlas<CPUContext, T>(CPUContext());
     size_t num_samples = tmat_.dims()[0];
     size_t input_width = input_.dims()[1];
     size_t tmat_width = tmat_.dims()[1];
@@ -211,7 +209,9 @@ struct MatrixBitCodeFunctorMulGradWeight {
         auto &scale = pair.first;
         auto *input_row = pair.second;
         T *weight_row = weight_value + op.first * weight_width;
-        blas.AXPY(input_width, scale, input_row, weight_row);
+        for (size_t k = 0; k < input_width; ++k) {
+          weight_row[k] += scale * input_row[k];
+        }
       }
     }
   }
@@ -238,7 +238,6 @@ struct MatrixBitCodeFunctorMulGradWeightSR {
 
   template <typename CodeTable>
   void operator()(const CodeTable &code_table) {
-    auto blas = funcs::GetBlas<CPUContext, T>(CPUContext());
     size_t num_samples = tmat_.dims()[0];
     size_t input_width = input_.dims()[1];
     size_t tmat_width = tmat_.dims()[1];
@@ -265,7 +264,9 @@ struct MatrixBitCodeFunctorMulGradWeightSR {
       for (auto &pair : op_in_row) {
         auto &scale = pair.first;
         auto *input_row = pair.second;
-        blas.AXPY(input_width, scale, input_row, weight_value);
+        for (size_t k = 0; k < input_width; ++k) {
+          weight_value[k] += scale * input_row[k];
+        }
       }
       weight_value += weight_width;
     }

@@ -13,13 +13,8 @@ See the License for the specific language governing permissions and
 limitations under the License. */
 #pragma once
 
-#include <algorithm>
-#include <vector>
-
 #include "paddle/common/enforce.h"
 #include "paddle/phi/backends/gpu/gpu_context.h"
-#include "paddle/phi/common/data_type.h"
-#include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/math_function.h"
 
@@ -49,11 +44,11 @@ void ColwiseSum<GPUContext, double>::operator()(const GPUContext& dev_ctx,
 
   SetConstant<GPUContext, double> set;
   set(dev_ctx, &one, static_cast<double>(1.0));
-  PADDLE_ENFORCE_LE_INT_MAX(in_dims[0], "ColwiseSum GEMV m");
-  PADDLE_ENFORCE_LE_INT_MAX(in_dims[1], "ColwiseSum GEMV n");
-  funcs::GetBlas<GPUContext, double>(dev_ctx).GEMV(true,
-                                                   static_cast<int>(in_dims[0]),
-                                                   static_cast<int>(in_dims[1]),
+  funcs::GetBlas<GPUContext, double>(dev_ctx).GEMM(CblasTrans,
+                                                   CblasNoTrans,
+                                                   in_dims[1],
+                                                   1,
+                                                   in_dims[0],
                                                    1.0,
                                                    input.data<double>(),
                                                    one.data<double>(),
@@ -85,14 +80,14 @@ void RowwiseSum<GPUContext, double>::operator()(const GPUContext& dev_ctx,
 
   SetConstant<GPUContext, double> set;
   set(dev_ctx, &one, static_cast<double>(1.0));
-  PADDLE_ENFORCE_LE_INT_MAX(in_dims[1], "RowwiseSum GEMV m");
-  PADDLE_ENFORCE_LE_INT_MAX(in_dims[0], "RowwiseSum GEMV n");
-  funcs::GetBlas<GPUContext, double>(dev_ctx).GEMV(true,
-                                                   static_cast<int>(in_dims[1]),
-                                                   static_cast<int>(in_dims[0]),
+  funcs::GetBlas<GPUContext, double>(dev_ctx).GEMM(CblasNoTrans,
+                                                   CblasNoTrans,
+                                                   in_dims[0],
+                                                   1,
+                                                   size,
                                                    1.0,
-                                                   one.data<double>(),
                                                    input.data<double>(),
+                                                   one.data<double>(),
                                                    0.0,
                                                    vector->data<double>());
 }

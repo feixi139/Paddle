@@ -58,32 +58,12 @@ struct CBlas<phi::bfloat16> {
   }
 
   template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::bfloat16 *x,
-                   const phi::bfloat16 *y,
-                   phi::bfloat16 *z) {
-    for (int i = 0; i < n; ++i) {
-      z[i] = x[i] + y[i];
-    }
-  }
-
-  template <typename... ARGS>
   static void VMUL(int n,
                    const phi::bfloat16 *x,
                    const phi::bfloat16 *y,
                    phi::bfloat16 *z) {
     for (int i = 0; i < n; ++i) {
       z[i] = x[i] * y[i];
-    }
-  }
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::bfloat16 *x,
-                   const phi::bfloat16 *y,
-                   phi::bfloat16 *z) {
-    for (int i = 0; i < n; ++i) {
-      z[i] = x[i] - y[i];
     }
   }
 };
@@ -149,60 +129,16 @@ struct CBlas<float> {
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vsAdd(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vsSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vsMul(args...);
   }
 
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vsDiv(args...);
-  }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vsExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vsSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vsPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vsInv(args...);
-  }
-
-  template <typename... ARGS>
-  static void VMERF(ARGS... args) {
-    phi::dynload::vmsErf(args...);
-  }
 #if !defined(_WIN32)
   template <typename... ARGS>
   static void CSRMM(ARGS... args) {
     phi::dynload::mkl_scsrmm(args...);
   }
 #endif
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    phi::dynload::cblas_strsm(args...);
-  }
 };
 
 template <>
@@ -265,60 +201,16 @@ struct CBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vdAdd(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vdSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vdMul(args...);
   }
 
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vdDiv(args...);
-  }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vdExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vdSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vdPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vdInv(args...);
-  }
-
-  template <typename... ARGS>
-  static void VMERF(ARGS... args) {
-    phi::dynload::vmdErf(args...);
-  }
 #if !defined(_WIN32)
   template <typename... ARGS>
   static void CSRMM(ARGS... args) {
     phi::dynload::mkl_dcsrmm(args...);
   }
 #endif
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    phi::dynload::cblas_dtrsm(args...);
-  }
 };
 
 template <>
@@ -338,45 +230,12 @@ struct CBlas<phi::complex64> {
   // so replace with the raw operator methods
   /*
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vcAdd(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vcSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vcMul(args...);
   }
 
   template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vcDiv(args...);
-  }
   */
-
-  template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
-  }
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
 
   template <typename... ARGS>
   static void VMUL(int n,
@@ -387,16 +246,6 @@ struct CBlas<phi::complex64> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -449,24 +298,6 @@ struct CBlas<phi::complex64> {
                               &beta,
                               c_,
                               ldc);
-  }
-
-  static void TRSM(CBLAS_LAYOUT layout,
-                   CBLAS_SIDE side,
-                   CBLAS_UPLO uplo,
-                   CBLAS_TRANSPOSE trans_a,
-                   CBLAS_DIAG diag,
-                   int M,
-                   int N,
-                   phi::complex64 alpha,
-                   const phi::complex64 *A,
-                   int lda,
-                   phi::complex64 *B,
-                   int ldb) {
-    const void *a_ = (const void *)(A);
-    void *b_ = static_cast<void *>(B);
-    phi::dynload::cblas_ctrsm(
-        layout, side, uplo, trans_a, diag, M, N, &alpha, a_, lda, b_, ldb);
   }
 
   template <typename... ARGS>
@@ -531,45 +362,12 @@ struct CBlas<phi::complex128> {
   // so replace with the raw operator methods
   /*
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vzAdd(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vzSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vzMul(args...);
   }
 
   template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vzDiv(args...);
-  }
   */
-
-  template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
-  }
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
 
   template <typename... ARGS>
   static void VMUL(int n,
@@ -580,16 +378,6 @@ struct CBlas<phi::complex128> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -642,24 +430,6 @@ struct CBlas<phi::complex128> {
                               &beta,
                               c_,
                               ldc);
-  }
-
-  static void TRSM(CBLAS_LAYOUT layout,
-                   CBLAS_SIDE side,
-                   CBLAS_UPLO uplo,
-                   CBLAS_TRANSPOSE trans_a,
-                   CBLAS_DIAG diag,
-                   int M,
-                   int N,
-                   phi::complex128 alpha,
-                   const phi::complex128 *A,
-                   int lda,
-                   phi::complex128 *B,
-                   int ldb) {
-    const void *a_ = (const void *)(A);
-    void *b_ = static_cast<void *>(B);
-    phi::dynload::cblas_ztrsm(
-        layout, side, uplo, trans_a, diag, M, N, &alpha, a_, lda, b_, ldb);
   }
 
   template <typename... ARGS>
@@ -736,53 +506,13 @@ struct CBlas<float> {
   }
 
   template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    phi::dynload::cblas_strsm(args...);
-  }
-
-  template <typename... ARGS>
   static void GEMM_BATCH(ARGS... args) {
     phi::dynload::cblas_sgemm_batch(args...);
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vsAdd(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vsSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vsMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vsDiv(args...);
-  }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vsExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vsSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vsPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vsInv(args...);
   }
 };
 
@@ -819,48 +549,8 @@ struct CBlas<double> {
   }
 
   template <typename... ARGS>
-  static void VADD(ARGS... args) {
-    phi::dynload::vdAdd(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSUB(ARGS... args) {
-    phi::dynload::vdSub(args...);
-  }
-
-  template <typename... ARGS>
   static void VMUL(ARGS... args) {
     phi::dynload::vdMul(args...);
-  }
-
-  template <typename... ARGS>
-  static void VDIV(ARGS... args) {
-    phi::dynload::vdDiv(args...);
-  }
-
-  template <typename... ARGS>
-  static void VEXP(ARGS... args) {
-    phi::dynload::vdExp(args...);
-  }
-
-  template <typename... ARGS>
-  static void VSQUARE(ARGS... args) {
-    phi::dynload::vdSqr(args...);
-  }
-
-  template <typename... ARGS>
-  static void VPOW(ARGS... args) {
-    phi::dynload::vdPowx(args...);
-  }
-
-  template <typename... ARGS>
-  static void VINV(ARGS... args) {
-    phi::dynload::vdInv(args...);
-  }
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    phi::dynload::cblas_dtrsm(args...);
   }
 };
 
@@ -877,26 +567,6 @@ struct CBlas<phi::complex64> {
   }
 
   template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
-  }
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
-
-  template <typename... ARGS>
   static void VMUL(int n,
                    const phi::complex64 *a,
                    const phi::complex64 *b,
@@ -905,16 +575,6 @@ struct CBlas<phi::complex64> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex64 *a,
-                   const phi::complex64 *b,
-                   phi::complex64 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -967,24 +627,6 @@ struct CBlas<phi::complex64> {
                               &beta,
                               c_,
                               ldc);
-  }
-
-  static void TRSM(CBLAS_LAYOUT layout,
-                   CBLAS_SIDE side,
-                   CBLAS_UPLO uplo,
-                   CBLAS_TRANSPOSE trans_a,
-                   CBLAS_DIAG diag,
-                   int M,
-                   int N,
-                   phi::complex64 alpha,
-                   const phi::complex64 *A,
-                   int lda,
-                   phi::complex64 *B,
-                   int ldb) {
-    const void *a_ = (const void *)(A);
-    void *b_ = static_cast<void *>(B);
-    phi::dynload::cblas_ctrsm(
-        layout, side, uplo, trans_a, diag, M, N, &alpha, a_, lda, b_, ldb);
   }
 
   template <typename... ARGS>
@@ -1045,26 +687,6 @@ struct CBlas<phi::complex128> {
   }
 
   template <typename... ARGS>
-  static void VADD(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] + b[i];
-    }
-  }
-
-  template <typename... ARGS>
-  static void VSUB(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] - b[i];
-    }
-  }
-
-  template <typename... ARGS>
   static void VMUL(int n,
                    const phi::complex128 *a,
                    const phi::complex128 *b,
@@ -1073,16 +695,6 @@ struct CBlas<phi::complex128> {
       y[i] = a[i] * b[i];
     }
   }
-  template <typename... ARGS>
-  static void VDIV(int n,
-                   const phi::complex128 *a,
-                   const phi::complex128 *b,
-                   phi::complex128 *y) {
-    for (int i = 0; i < n; ++i) {
-      y[i] = a[i] / b[i];
-    }
-  }
-
   template <typename... ARGS>
   static void GEMV(CBLAS_LAYOUT layout,
                    CBLAS_TRANSPOSE trans,
@@ -1135,24 +747,6 @@ struct CBlas<phi::complex128> {
                               &beta,
                               c_,
                               ldc);
-  }
-
-  static void TRSM(CBLAS_LAYOUT layout,
-                   CBLAS_SIDE side,
-                   CBLAS_UPLO uplo,
-                   CBLAS_TRANSPOSE trans_a,
-                   CBLAS_DIAG diag,
-                   int M,
-                   int N,
-                   phi::complex128 alpha,
-                   const phi::complex128 *A,
-                   int lda,
-                   phi::complex128 *B,
-                   int ldb) {
-    const void *a_ = (const void *)(A);
-    void *b_ = static_cast<void *>(B);
-    phi::dynload::cblas_ztrsm(
-        layout, side, uplo, trans_a, diag, M, N, &alpha, a_, lda, b_, ldb);
   }
 
   template <typename... ARGS>
@@ -1218,11 +812,6 @@ struct CBlas<float> {
   static void GEMV(ARGS... args) {
     cblas_sgemv(args...);
   }
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    cblas_strsm(args...);
-  }
 };
 
 template <>
@@ -1240,11 +829,6 @@ struct CBlas<double> {
   template <typename... ARGS>
   static void GEMV(ARGS... args) {
     cblas_dgemv(args...);
-  }
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    cblas_dtrsm(args...);
   }
 };
 
@@ -1294,21 +878,6 @@ struct CBlas<phi::complex64> {
     cblas_cgemm(
         layout, TransA, TransB, M, N, K, &alpha, A, lda, B, ldb, &beta, C, ldc);
   }
-
-  static void TRSM(const CBLAS_LAYOUT layout,
-                   const CBLAS_SIDE side,
-                   const CBLAS_UPLO uplo,
-                   const CBLAS_TRANSPOSE transA,
-                   const CBLAS_DIAG diag,
-                   const int M,
-                   const int N,
-                   const phi::complex64 alpha,
-                   const phi::complex64 *A,
-                   const int lda,
-                   phi::complex64 *B,
-                   const int ldb) {
-    cblas_ctrsm(layout, side, uplo, transA, diag, M, N, &alpha, A, lda, B, ldb);
-  }
 };
 
 template <>
@@ -1357,21 +926,6 @@ struct CBlas<phi::complex128> {
     cblas_zgemm(
         layout, TransA, TransB, M, N, K, &alpha, A, lda, B, ldb, &beta, C, ldc);
   }
-
-  static void TRSM(const CBLAS_LAYOUT layout,
-                   const CBLAS_SIDE side,
-                   const CBLAS_UPLO uplo,
-                   const CBLAS_TRANSPOSE transA,
-                   const CBLAS_DIAG diag,
-                   const int M,
-                   const int N,
-                   const phi::complex128 alpha,
-                   const phi::complex128 *A,
-                   const int lda,
-                   phi::complex128 *B,
-                   const int ldb) {
-    cblas_ztrsm(layout, side, uplo, transA, diag, M, N, &alpha, A, lda, B, ldb);
-  }
 };
 
 #endif
@@ -1390,18 +944,6 @@ struct CBlas<phi::float16> {
   static void VMUL(...) {
     PADDLE_THROW(common::errors::Unimplemented(
         "float16 VMUL not supported on CPU, please check your code"));
-  }
-  static void VEXP(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 VEXP not supported on CPU, please check your code"));
-  }
-  static void VSQUARE(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 VSQUARE not supported on CPU, please check your code"));
-  }
-  static void VPOW(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 VPOW not supported on CPU, please check your code"));
   }
   static void DOT(...) {
     PADDLE_THROW(common::errors::Unimplemented(
@@ -1680,146 +1222,113 @@ void Blas<DeviceContext>::MatMul(const DenseTensor &mat_a,
 
 template <>
 template <typename T>
-void Blas<CPUContext>::AXPY(int n, T alpha, const T *x, T *y) const {
-  CBlas<T>::AXPY(n, alpha, x, 1, y, 1);
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VADD(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VADD(n, x, y, z);
-#else
-  if (x == z) {
-    this->template AXPY<T>(n, (T)(1.), y, z);
-  } else {
-    if (y != z) {
-      std::memcpy(z, y, n * sizeof(T));
-    }
-    this->template AXPY<T>(n, (T)(1.), x, z);
-  }
-#endif
-}
-
-template <>
-template <typename T>
 void Blas<CPUContext>::VSUB(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VSUB(n, x, y, z);
-#else
-  // try to find if openblas support vsub
   for (int i = 0; i < n; ++i) {
     z[i] = x[i] - y[i];
   }
-#endif
 }
 
 template <>
 template <typename T>
 void Blas<CPUContext>::VMUL(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VMUL(n, x, y, z);
-#else
-  // try to find if openblas support vmul
   for (int i = 0; i < n; ++i) {
     z[i] = x[i] * y[i];
   }
-#endif
 }
 
 template <>
 template <typename T>
 void Blas<CPUContext>::VDIV(int n, const T *x, const T *y, T *z) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VDIV(n, x, y, z);
-#else
-  // try to find if openblas support vdiv
   for (int i = 0; i < n; ++i) {
     z[i] = x[i] / y[i];
   }
-#endif
 }
 
 template <>
 template <typename T>
 void Blas<CPUContext>::VEXP(int n, const T *x, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VEXP(n, x, y);
-#else
-  // try to find if openblas support vexp
   for (int i = 0; i < n; ++i) {
     y[i] = std::exp(x[i]);
   }
-#endif
 }
 
 template <>
 template <typename T>
 void Blas<CPUContext>::VSQUARE(int n, const T *x, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VSQUARE(n, x, y);
-#else
   for (int i = 0; i < n; ++i) {
     y[i] = x[i] * x[i];
   }
-#endif
 }
 
 template <>
 template <typename T>
 void Blas<CPUContext>::VPOW(int n, const T *x, T a, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VPOW(n, x, a, y);
-#else
   for (int i = 0; i < n; ++i) {
     y[i] = std::pow(x[i], a);
   }
-#endif
-}
-
-template <>
-template <typename T>
-T Blas<CPUContext>::DOT(int n, const T *x, const T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  return CBlas<T>::DOT(n, x, 1, y, 1);
-#else
-  // try to find if openblas support cblas_dot
-  T sum = 0;
-  for (int i = 0; i < n; ++i) {
-    sum += x[i] * y[i];
-  }
-  return sum;
-#endif
 }
 
 template <>
 template <typename T>
 T Blas<CPUContext>::ASUM(int n, T *x, int inc) const {
   auto sum = static_cast<T>(0.0);
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  sum = CBlas<T>::ASUM(n, x, inc);
-#else
-  // TODO(jczaja): check if openblas does provide cblas_sasum/cblas_dasum
   for (int c = 0; c < n; ++c) {
-    sum += x[c];
+    sum += x[c * inc];
   }
-#endif
   return sum;
+}
+
+template <typename DeviceContext>
+template <typename T>
+void Blas<DeviceContext>::VINV(int n, const T *a, T *y) const {
+  for (int i = 0; i < n; ++i) {
+    y[i] = 1.0 / a[i];
+  }
 }
 
 template <>
 template <typename T>
-void Blas<CPUContext>::GEMV(bool trans_a,
-                            int M,
-                            int N,
-                            T alpha,
-                            const T *A,
-                            const T *B,
-                            T beta,
-                            T *C) const {
-  CBLAS_TRANSPOSE transA = !trans_a ? CblasNoTrans : CblasTrans;
-  CBlas<T>::GEMV(CblasRowMajor, transA, M, N, alpha, A, N, B, 1, beta, C, 1);
+void Blas<CPUContext>::VMERF(int n, const T *a, T *y, int64_t mode) const {
+  for (int i = 0; i < n; ++i) {
+    y[i] = std::erf(a[i]);
+  }
 }
+
+#ifdef PADDLE_WITH_MKLML
+template <>
+template <typename T>
+void Blas<CPUContext>::CSRMM(const char *transa,
+                             const int *m,
+                             const int *n,
+                             const int *k,
+                             const T *alpha,
+                             const char *matdescra,
+                             const T *val,
+                             const int *index,
+                             const int *pntrb,
+                             const int *pntre,
+                             const T *b,
+                             const int *ldb,
+                             const T *beta,
+                             T *c,
+                             const int *ldc) const {
+  CBlas<T>::CSRMM(transa,
+                  m,
+                  n,
+                  k,
+                  alpha,
+                  matdescra,
+                  val,
+                  index,
+                  pntrb,
+                  pntre,
+                  b,
+                  ldb,
+                  beta,
+                  c,
+                  ldc);
+}
+#endif
 
 template <>
 template <typename T>
@@ -2717,83 +2226,6 @@ void Blas<DeviceContext>::MatMulWithHead(const DenseTensor &mat_a,
   }
 }
 #endif  // @} End Group Blas HML: MatMulWithHead
-
-template <typename DeviceContext>
-template <typename T>
-void Blas<DeviceContext>::VINV(int n, const T *a, T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  CBlas<T>::VINV(n, a, y);
-#else
-  for (int i = 0; i < n; ++i) {
-    y[i] = 1.0 / a[i];
-  }
-#endif
-}
-
-template <>
-template <typename T>
-void Blas<CPUContext>::VMERF(int n, const T *a, T *y, int64_t mode) const {
-#ifdef PADDLE_WITH_MKLML
-  CBlas<T>::VMERF(n, a, y, mode);
-#else
-  for (int i = 0; i < n; ++i) {
-    y[i] = std::erf(a[i]);
-  }
-#endif
-}
-
-#ifdef PADDLE_WITH_MKLML
-template <>
-template <typename T>
-void Blas<CPUContext>::CSRMM(const char *transa,
-                             const int *m,
-                             const int *n,
-                             const int *k,
-                             const T *alpha,
-                             const char *matdescra,
-                             const T *val,
-                             const int *index,
-                             const int *pntrb,
-                             const int *pntre,
-                             const T *b,
-                             const int *ldb,
-                             const T *beta,
-                             T *c,
-                             const int *ldc) const {
-  CBlas<T>::CSRMM(transa,
-                  m,
-                  n,
-                  k,
-                  alpha,
-                  matdescra,
-                  val,
-                  index,
-                  pntrb,
-                  pntre,
-                  b,
-                  ldb,
-                  beta,
-                  c,
-                  ldc);
-}
-#endif
-
-template <>
-template <typename T>
-void Blas<CPUContext>::TRSM(CBLAS_SIDE side,
-                            CBLAS_UPLO uplo,
-                            CBLAS_TRANSPOSE transA,
-                            CBLAS_DIAG diag,
-                            int M,
-                            int N,
-                            T alpha,
-                            const T *A,
-                            int lda,
-                            T *B,
-                            int ldb) const {
-  CBlas<T>::TRSM(
-      CblasRowMajor, side, uplo, transA, diag, M, N, alpha, A, lda, B, ldb);
-}
 
 }  // namespace funcs
 }  // namespace phi

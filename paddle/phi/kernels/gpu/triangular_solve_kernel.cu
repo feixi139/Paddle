@@ -73,134 +73,76 @@ void TriangularSolveKernel(const Context& dev_ctx,
   }
 
   auto blas = funcs::GetBlas<GPUContext, T>(dev_ctx);
-  if (batch_size <= 8 && M >= 64) {
-    for (int64_t i = 0; i < batch_size; i++) {
-      blas.TRSM(CblasLeft,
-                uplo,
-                transA,
-                diag,
-                M,
-                N,
-                T(1),
-                x_bst_data + i * M * M,
-                lda,
-                out_data + i * N * M,
-                ldb);
-    }
-  } else {
-    bool use_chunking_workaround = false;
-    // Workaround the following a bug on CUDA < 12.1
-    // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling
-    // `cublasStrsmBatched
+  bool use_chunking_workaround = false;
+  // Workaround the following a bug on CUDA < 12.1
+  // RuntimeError: CUDA error: CUBLAS_STATUS_EXECUTION_FAILED when calling
+  // `cublasStrsmBatched
 #if (defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)) && \
     defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION < 12100)
 
-    if (N > 524280) {
-      use_chunking_workaround = true;
-    }
+  if (N > 524280) {
+    use_chunking_workaround = true;
+  }
 #endif
 
-    if (use_chunking_workaround) {
-      constexpr int64_t max_n_size = 524280;
-      int64_t n_chunks = (N + max_n_size - 1) / max_n_size;
+  if (use_chunking_workaround) {
+    constexpr int64_t max_n_size = 524280;
+    int64_t n_chunks = (N + max_n_size - 1) / max_n_size;
 
-      std::vector<const T*> cpu_a_ptrs(batch_size);
-      for (int64_t i = 0; i < batch_size; ++i) {
-        cpu_a_ptrs[i] = x_bst_data + i * M * M;
+    std::vector<const T*> cpu_a_ptrs(batch_size);
+    for (int64_t i = 0; i < batch_size; ++i) {
+      cpu_a_ptrs[i] = x_bst_data + i * M * M;
+    }
+    Allocator::AllocationPtr gpu_a_ptrs_data = memory_utils::Alloc(
+        dev_ctx.GetPlace(),
+        cpu_a_ptrs.size() * sizeof(T*),
+        phi::Stream(reinterpret_cast<phi::StreamId>(dev_ctx.stream())));
+    size_t nbytes_a_ptrs = cpu_a_ptrs.size() * sizeof(T*);
+    const void* stable_a_ptrs =
+        backends::gpu::RestoreHostMemIfCapturingCUDAGraph(
+            reinterpret_cast<uint8_t*>(const_cast<T**>(cpu_a_ptrs.data())),
+            nbytes_a_ptrs);
+    memory_utils::Copy(dev_ctx.GetPlace(),
+                       gpu_a_ptrs_data->ptr(),
+                       CPUPlace(),
+                       stable_a_ptrs,
+                       nbytes_a_ptrs,
+                       dev_ctx.stream());
+    const T** gpu_a_ptrs = reinterpret_cast<const T**>(gpu_a_ptrs_data->ptr());
+
+    Allocator::AllocationPtr gpu_b_ptrs_data = memory_utils::Alloc(
+        dev_ctx.GetPlace(),
+        batch_size * sizeof(T*),
+        Stream(reinterpret_cast<StreamId>(dev_ctx.stream())));
+    T** gpu_b_ptrs = reinterpret_cast<T**>(gpu_b_ptrs_data->ptr());
+
+    for (int64_t i = 0; i < n_chunks; ++i) {
+      int64_t n_offset = i * max_n_size;
+      int current_n =
+          static_cast<int>(std::min((int64_t)N - n_offset, max_n_size));
+
+      std::vector<T*> cpu_b_ptrs_for_chunk(batch_size);
+      for (int64_t j = 0; j < batch_size; ++j) {
+        cpu_b_ptrs_for_chunk[j] = out_data + j * M * N + n_offset;
       }
-      Allocator::AllocationPtr gpu_a_ptrs_data = memory_utils::Alloc(
-          dev_ctx.GetPlace(),
-          cpu_a_ptrs.size() * sizeof(T*),
-          phi::Stream(reinterpret_cast<phi::StreamId>(dev_ctx.stream())));
-      size_t nbytes_a_ptrs = cpu_a_ptrs.size() * sizeof(T*);
-      const void* stable_a_ptrs =
+      size_t nbytes_b_ptrs = cpu_b_ptrs_for_chunk.size() * sizeof(T*);
+      const void* stable_b_ptrs =
           backends::gpu::RestoreHostMemIfCapturingCUDAGraph(
-              reinterpret_cast<uint8_t*>(const_cast<T**>(cpu_a_ptrs.data())),
-              nbytes_a_ptrs);
+              reinterpret_cast<uint8_t*>(cpu_b_ptrs_for_chunk.data()),
+              nbytes_b_ptrs);
       memory_utils::Copy(dev_ctx.GetPlace(),
-                         gpu_a_ptrs_data->ptr(),
+                         gpu_b_ptrs_data->ptr(),
                          CPUPlace(),
-                         stable_a_ptrs,
-                         nbytes_a_ptrs,
+                         stable_b_ptrs,
+                         nbytes_b_ptrs,
                          dev_ctx.stream());
-      const T** gpu_a_ptrs =
-          reinterpret_cast<const T**>(gpu_a_ptrs_data->ptr());
-
-      Allocator::AllocationPtr gpu_b_ptrs_data = memory_utils::Alloc(
-          dev_ctx.GetPlace(),
-          batch_size * sizeof(T*),
-          Stream(reinterpret_cast<StreamId>(dev_ctx.stream())));
-      T** gpu_b_ptrs = reinterpret_cast<T**>(gpu_b_ptrs_data->ptr());
-
-      for (int64_t i = 0; i < n_chunks; ++i) {
-        int64_t n_offset = i * max_n_size;
-        int current_n =
-            static_cast<int>(std::min((int64_t)N - n_offset, max_n_size));
-
-        std::vector<T*> cpu_b_ptrs_for_chunk(batch_size);
-        for (int64_t j = 0; j < batch_size; ++j) {
-          cpu_b_ptrs_for_chunk[j] = out_data + j * M * N + n_offset;
-        }
-        size_t nbytes_b_ptrs = cpu_b_ptrs_for_chunk.size() * sizeof(T*);
-        const void* stable_b_ptrs =
-            backends::gpu::RestoreHostMemIfCapturingCUDAGraph(
-                reinterpret_cast<uint8_t*>(cpu_b_ptrs_for_chunk.data()),
-                nbytes_b_ptrs);
-        memory_utils::Copy(dev_ctx.GetPlace(),
-                           gpu_b_ptrs_data->ptr(),
-                           CPUPlace(),
-                           stable_b_ptrs,
-                           nbytes_b_ptrs,
-                           dev_ctx.stream());
-
-        blas.BatchedTRSM(CblasLeft,
-                         uplo,
-                         transA,
-                         diag,
-                         M,
-                         current_n,
-                         static_cast<T>(1.0),
-                         gpu_a_ptrs,
-                         lda,
-                         gpu_b_ptrs,
-                         ldb,
-                         batch_size);
-      }
-    } else {
-      std::vector<const T*> cpu_ptrs(batch_size * 2);
-      for (int64_t i = 0; i < batch_size; ++i) {
-        cpu_ptrs[i] = x_bst_data + i * M * M;
-        cpu_ptrs[i + batch_size] = out_data + i * M * N;
-      }
-
-      Allocator::AllocationPtr tmp_gpu_ptrs_data = memory_utils::Alloc(
-          dev_ctx.GetPlace(),
-          cpu_ptrs.size() * sizeof(T*),
-          Stream(reinterpret_cast<StreamId>(dev_ctx.stream())));
-
-      size_t nbytes_ptrs = cpu_ptrs.size() * sizeof(T*);
-      const void* stable_ptrs =
-          backends::gpu::RestoreHostMemIfCapturingCUDAGraph(
-              reinterpret_cast<uint8_t*>(const_cast<T**>(cpu_ptrs.data())),
-              nbytes_ptrs);
-      memory_utils::Copy(dev_ctx.GetPlace(),
-                         tmp_gpu_ptrs_data->ptr(),
-                         CPUPlace(),
-                         stable_ptrs,
-                         nbytes_ptrs,
-                         dev_ctx.stream());
-
-      const T** gpu_a_ptrs =
-          reinterpret_cast<const T**>(tmp_gpu_ptrs_data->ptr());
-      T** gpu_b_ptrs =
-          reinterpret_cast<T**>(tmp_gpu_ptrs_data->ptr()) + batch_size;
 
       blas.BatchedTRSM(CblasLeft,
                        uplo,
                        transA,
                        diag,
                        M,
-                       N,
+                       current_n,
                        static_cast<T>(1.0),
                        gpu_a_ptrs,
                        lda,
@@ -208,9 +150,48 @@ void TriangularSolveKernel(const Context& dev_ctx,
                        ldb,
                        batch_size);
     }
+  } else {
+    std::vector<const T*> cpu_ptrs(batch_size * 2);
+    for (int64_t i = 0; i < batch_size; ++i) {
+      cpu_ptrs[i] = x_bst_data + i * M * M;
+      cpu_ptrs[i + batch_size] = out_data + i * M * N;
+    }
+
+    Allocator::AllocationPtr tmp_gpu_ptrs_data = memory_utils::Alloc(
+        dev_ctx.GetPlace(),
+        cpu_ptrs.size() * sizeof(T*),
+        Stream(reinterpret_cast<StreamId>(dev_ctx.stream())));
+
+    size_t nbytes_ptrs = cpu_ptrs.size() * sizeof(T*);
+    const void* stable_ptrs = backends::gpu::RestoreHostMemIfCapturingCUDAGraph(
+        reinterpret_cast<uint8_t*>(const_cast<T**>(cpu_ptrs.data())),
+        nbytes_ptrs);
+    memory_utils::Copy(dev_ctx.GetPlace(),
+                       tmp_gpu_ptrs_data->ptr(),
+                       CPUPlace(),
+                       stable_ptrs,
+                       nbytes_ptrs,
+                       dev_ctx.stream());
+
+    const T** gpu_a_ptrs =
+        reinterpret_cast<const T**>(tmp_gpu_ptrs_data->ptr());
+    T** gpu_b_ptrs =
+        reinterpret_cast<T**>(tmp_gpu_ptrs_data->ptr()) + batch_size;
+
+    blas.BatchedTRSM(CblasLeft,
+                     uplo,
+                     transA,
+                     diag,
+                     M,
+                     N,
+                     static_cast<T>(1.0),
+                     gpu_a_ptrs,
+                     lda,
+                     gpu_b_ptrs,
+                     ldb,
+                     batch_size);
   }
 }
-
 }  // namespace phi
 
 #ifdef PADDLE_WITH_CUDA

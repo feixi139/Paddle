@@ -42,8 +42,8 @@ void MvGradKernel(const Context& dev_ctx,
   }
 
   const auto& dim_x = x.dims();
-  int m = static_cast<int>(dim_x[0]);
-  int n = static_cast<int>(dim_x[1]);
+  int64_t m = dim_x[0];
+  int64_t n = dim_x[1];
 
   // get data ptr
   const T* x_data = x.data<T>();
@@ -53,8 +53,8 @@ void MvGradKernel(const Context& dev_ctx,
   if (dx) {
     T* dx_data = dev_ctx.template Alloc<T>(dx);
 
-    for (int i = 0; i < m; ++i) {
-      for (int j = 0; j < n; ++j) {
+    for (int64_t i = 0; i < m; ++i) {
+      for (int64_t j = 0; j < n; ++j) {
         dx_data[i * n + j] = dout_data[i] * vec_data[j];
       }
     }
@@ -65,9 +65,11 @@ void MvGradKernel(const Context& dev_ctx,
 
     auto blas = funcs::GetBlas<Context, T>(dev_ctx);
 
-    blas.GEMV(true,
-              dim_x[0],
+    blas.GEMM(CblasTrans,
+              CblasNoTrans,
               dim_x[1],
+              1,
+              dim_x[0],
               static_cast<T>(1),
               x_data,
               dout_data,

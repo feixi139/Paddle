@@ -164,7 +164,10 @@ void AttentionLSTMKernel(const Context& dev_ctx,
     for (int step = 0; step < seq_len; ++step) {
       /// 1. compute attention vector
       // 1a. prev_cell(1xD) * fc(D) rest part of atten_wgt
-      T prev_cell_bias = blas.DOT(D, prev_cell_data, atten_w_data + M);
+      T prev_cell_bias = static_cast<T>(0);
+      for (int j = 0; j < D; ++j) {
+        prev_cell_bias += prev_cell_data[j] * atten_w_data[M + j];
+      }
       // 1b. add cell bias and relu
       bias_relu<T>(seq_len, cur_atten_x_data, &prev_cell_bias, fc_out_data);
       // 1c. fc scalar
@@ -200,7 +203,9 @@ void AttentionLSTMKernel(const Context& dev_ctx,
                   D4);
       }
       // since input is 1xM, so can use add bias
-      blas.VADD(D4, lstm_b_data, lstm_out_data, lstm_out_data);
+      for (int j = 0; j < D4; ++j) {
+        lstm_out_data[j] += lstm_b_data[j];
+      }
 
       // gate act: sigmoid
       act_gate(D3, lstm_out_data, lstm_out_data);
@@ -214,7 +219,9 @@ void AttentionLSTMKernel(const Context& dev_ctx,
       blas.VMUL(D, lstm_out_data + D, lstm_out_data + D3, lstm_out_data + D);
 
       // cell_out = a + b
-      blas.VADD(D, lstm_out_data, lstm_out_data + D, cur_cell_out_data);
+      for (int j = 0; j < D; ++j) {
+        cur_cell_out_data[j] = lstm_out_data[j] + lstm_out_data[D + j];
+      }
 
       // state act tanh(cell_out) * output_gate
       act_cell(D, cur_cell_out_data, lstm_out_data);

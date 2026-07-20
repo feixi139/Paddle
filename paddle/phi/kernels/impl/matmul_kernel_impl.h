@@ -161,23 +161,16 @@ void MatMulFunctionImplWithBlas(
                 dev_ctx.template Alloc<T>(Out));
       return;
     } else {
-#if defined(PADDLE_WITH_CUDA) && !defined(PADDLE_WITH_HIP) && !defined(_WIN32)
-      if (std::is_same<Context, GPUContext>::value) {
-        blas.CUDOT(M, X.data<T>(), 1, Y.data<T>(), 1, Out->data<T>());
-      } else  // NOLINT
-#endif
-      {
-        blas.GEMM(CblasNoTrans,
-                  CblasTrans,
-                  1,
-                  1,
-                  M,
-                  static_cast<T>(1),
-                  y_data,
-                  x_data,
-                  static_cast<T>(flag),
-                  dev_ctx.template Alloc<T>(Out));
-      }
+      blas.GEMM(CblasNoTrans,
+                CblasTrans,
+                1,
+                1,
+                M,
+                static_cast<T>(1),
+                y_data,
+                x_data,
+                static_cast<T>(flag),
+                dev_ctx.template Alloc<T>(Out));
       return;
     }
   }
@@ -219,8 +212,10 @@ void MatMulFunctionImplWithBlas(
     if (trans_y) {
       const int64_t M = Y.numel() / N;
       VLOG(3) << "MatMul's case 2";
-      blas.GEMV(false,
+      blas.GEMM(CblasNoTrans,
+                CblasNoTrans,
                 M,
+                1,
                 N,
                 static_cast<T>(1),
                 y_data,
@@ -232,9 +227,11 @@ void MatMulFunctionImplWithBlas(
       const int64_t batch_size = Y.numel() / (M * N);
       if (batch_size == 1) {
         VLOG(3) << "MatMul's case 3";
-        blas.GEMV(true,
-                  N,
+        blas.GEMM(CblasTrans,
+                  CblasNoTrans,
                   M,
+                  1,
+                  N,
                   static_cast<T>(1),
                   y_data,
                   x_data,
@@ -300,9 +297,11 @@ void MatMulFunctionImplWithBlas(
       const int64_t batch_size = X.numel() / (M * N);
       if (batch_size == 1) {
         VLOG(3) << "MatMul's case 5";
-        blas.GEMV(true,
-                  N,
+        blas.GEMM(CblasTrans,
+                  CblasNoTrans,
                   M,
+                  1,
+                  N,
                   static_cast<T>(1),
                   x_data,
                   y_data,
@@ -327,8 +326,10 @@ void MatMulFunctionImplWithBlas(
     } else {
       const int64_t M = X.numel() / N;
       VLOG(3) << "MatMul's case 7";
-      blas.GEMV(false,
+      blas.GEMM(CblasNoTrans,
+                CblasNoTrans,
                 M,
+                1,
                 N,
                 static_cast<T>(1),
                 x_data,
@@ -421,9 +422,10 @@ void MatMulFunctionImplWithBlas(
   } else if (x_batch_size == 1) {
     if (M == 1 && trans_y) {
       VLOG(3) << "MatMul's case 9";
-      PADDLE_ENFORCE_LE_INT_MAX(y_batch_size * N, "GEMV M");
-      blas.GEMV(false,
-                static_cast<int>(y_batch_size * N),
+      blas.GEMM(CblasNoTrans,
+                CblasNoTrans,
+                y_batch_size * N,
+                1,
                 K,
                 static_cast<T>(1),
                 y_data,

@@ -14,11 +14,10 @@
 
 #pragma once
 
+#include <cmath>
+
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/core/selected_rows.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
-#include "paddle/phi/kernels/funcs/eigen/common.h"
-#include "paddle/phi/kernels/funcs/eigen/eigen_function.h"
 #include "paddle/phi/kernels/funcs/math_function.h"
 #include "paddle/phi/kernels/funcs/matrix_bit_code.h"
 
@@ -64,15 +63,12 @@ void HSigmoidLossGradKernelImpl(const Context& dev_ctx,
 
   // softrelu derivative
 
-  auto blas = funcs::GetBlas<Context, T>(dev_ctx);
-
   auto* pre_out_grad_data = pre_out_grad.data<T>();
   auto* pre_out_data = pre_out.template data<T>();
   auto n = pre_out.numel();
-  blas.VEXP(n, pre_out_data, pre_out_grad_data);
-  blas.VINV(n, pre_out_grad_data, pre_out_grad_data);
   for (int64_t i = 0; i < n; ++i) {
-    pre_out_grad_data[i] = 1.0 - pre_out_grad_data[i];
+    pre_out_grad_data[i] =
+        static_cast<T>(1) - static_cast<T>(1) / std::exp(pre_out_data[i]);
   }
   bit_code->Sub(&pre_out_grad);  // the gradient of clip(w * x + b)
   auto* out_grad_data = out_grad.template data<T>();

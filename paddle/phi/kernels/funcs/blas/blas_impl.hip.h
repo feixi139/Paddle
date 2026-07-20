@@ -63,11 +63,6 @@ struct CUBlas<float> {
   }
 
   template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::rocblas_strsm(args...));
-  }
-
-  template <typename... ARGS>
   static void GETRF_BATCH(ARGS... args) {
     PADDLE_THROW(common::errors::Unimplemented(
         "cublasSgetrfBatched is not supported on HIP platform."));
@@ -123,11 +118,6 @@ struct CUBlas<double> {
   static void GEMM_EX(ARGS... args) {
     PADDLE_THROW(common::errors::Unimplemented(
         "Currently there are not cublasDgemmEx."));
-  }
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::rocblas_dtrsm(args...));
   }
 
   template <typename... ARGS>
@@ -1247,72 +1237,6 @@ inline void Blas<GPUContext>::GEMM(bool transA,
 
 template <>
 template <typename T>
-void Blas<GPUContext>::AXPY(int n, T alpha, const T *x, T *y) const {
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::AXPY(handle, n, &alpha, x, 1, y, 1);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<GPUContext>::GEMV(bool trans_a,
-                            int M,
-                            int N,
-                            T alpha,
-                            const T *A,
-                            const T *B,
-                            T beta,
-                            T *C) const {
-  rocblas_operation cuTransA =
-      !trans_a ? rocblas_operation_transpose : rocblas_operation_none;
-
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::GEMV(handle, cuTransA, N, M, &alpha, A, N, B, 1, &beta, C, 1);
-  });
-}
-
-template <>
-template <>
-inline void Blas<GPUContext>::GEMV(bool trans_a,
-                                   int M,
-                                   int N,
-                                   phi::float16 alpha,
-                                   const phi::float16 *A,
-                                   const phi::float16 *B,
-                                   phi::float16 beta,
-                                   phi::float16 *C) const {
-  // Because cublas doesn't support half gemv, we use cublasHgemm to achieve it.
-  if (trans_a) {
-    this->template GEMM<phi::float16>(
-        CblasNoTrans, CblasNoTrans, 1, N, M, alpha, B, A, beta, C);
-  } else {
-    this->template GEMM<phi::float16>(
-        CblasNoTrans, CblasNoTrans, M, 1, N, alpha, A, B, beta, C);
-  }
-}
-
-template <>
-template <>
-inline void Blas<GPUContext>::GEMV(bool trans_a,
-                                   int M,
-                                   int N,
-                                   phi::bfloat16 alpha,
-                                   const phi::bfloat16 *A,
-                                   const phi::bfloat16 *B,
-                                   phi::bfloat16 beta,
-                                   phi::bfloat16 *C) const {
-  // Because rocblas doesn't support bfloat16 gemv, we use gemmex to achieve it.
-  if (trans_a) {
-    this->template GEMM<phi::bfloat16>(
-        CblasNoTrans, CblasNoTrans, 1, N, M, alpha, B, A, beta, C);
-  } else {
-    this->template GEMM<phi::bfloat16>(
-        CblasNoTrans, CblasNoTrans, M, 1, N, alpha, A, B, beta, C);
-  }
-}
-
-template <>
-template <typename T>
 void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                                    CBLAS_TRANSPOSE transB,
                                    int64_t M,
@@ -1840,99 +1764,6 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
     this->template GEMM<phi::bfloat16>(
         transA, transB, M, N, K, alpha, A[k], B[k], beta, C[k]);
   }
-}
-
-template <>
-template <typename T>
-void Blas<GPUContext>::TRSM(CBLAS_SIDE side,
-                            CBLAS_UPLO uplo,
-                            CBLAS_TRANSPOSE transA,
-                            CBLAS_DIAG diag,
-                            int M,
-                            int N,
-                            T alpha,
-                            const T *A,
-                            int lda,
-                            T *B,
-                            int ldb) const {
-  // solve row major `op ( A ) X = α B` by taking it as `X' op ( A' )  =  α B'`
-  // where ' stands for transpose
-  rocblas_side cuSide =
-      (side == CblasLeft) ? rocblas_side_right : rocblas_side_left;
-  rocblas_fill cuUplo =
-      (uplo == CblasLower) ? rocblas_fill_upper : rocblas_fill_lower;
-  // use CUBLAS_OP_C (conjugate transpose) for complex
-  rocblas_operation cuTransA = (transA == CblasNoTrans)
-                                   ? rocblas_operation_none
-                                   : rocblas_operation_transpose;
-  rocblas_diagonal cuDiag =
-      (diag == CblasUnit) ? rocblas_diagonal_unit : rocblas_diagonal_non_unit;
-
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::TRSM(
-        handle, cuSide, cuUplo, cuTransA, cuDiag, N, M, &alpha, A, lda, B, ldb);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<GPUContext>::BatchedGETRF(
-    int n, T **a, int *ipiv, int *info, int batch_size) const {
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::GETRF_BATCH(handle, n, a, n, ipiv, info, batch_size);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<GPUContext>::BatchedGETRI(int n,
-                                    const T **a,
-                                    const int *ipiv,
-                                    T **a_inv,
-                                    int *info,
-                                    int batch_size) const {
-  PADDLE_ENFORCE_NE(
-      a_inv,
-      a,
-      common::errors::InvalidArgument(
-          "cuBLAS function 'cublas<S/D>getrfBatched' cannot be executed "
-          "in-place. The memory space of output matrix (address: %p) cannot "
-          "overlap memory space of input matrix (address: %p).",
-          a_inv,
-          a));
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::GETRI_BATCH(handle, n, a, n, ipiv, a_inv, n, info, batch_size);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<GPUContext>::BatchedMatInv(
-    int n, const T **a, T **a_inv, int *info, int batch_size) const {
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::MATINV_BATCH(handle, n, a, n, a_inv, n, info, batch_size);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<GPUContext>::BatchedGETRS(CBLAS_TRANSPOSE trans,
-                                    int n,
-                                    int nrhs,
-                                    const T **a,
-                                    int lda,
-                                    int *ipiv,
-                                    T **b,
-                                    int ldb,
-                                    int *info,
-                                    int batch_size) const {
-  rocblas_operation cuTrans = (trans == CblasNoTrans)
-                                  ? rocblas_operation_none
-                                  : rocblas_operation_transpose;
-  dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::GETRS_BATCH(
-        handle, cuTrans, n, nrhs, a, lda, ipiv, b, ldb, info, batch_size);
-  });
 }
 
 template <>

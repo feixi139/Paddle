@@ -14,12 +14,12 @@
 
 #pragma once
 
+#include <cstring>
+
 #include "glog/logging.h"
 
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/core/tensor_utils.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
-#include "paddle/phi/kernels/funcs/eigen/common.h"
 #include "paddle/phi/kernels/funcs/math_function.h"
 
 namespace phi {
@@ -42,13 +42,14 @@ struct IndexSelectAdd<
     Context,
     T,
     typename std::enable_if<std::is_floating_point<T>::value>::type> {
-  void operator()(const Context& dev_ctx,
+  void operator()(const Context& dev_ctx UNUSED,
                   int slice_size,
                   const T* src_pointer,
                   const T* p_pointer,
                   T* dist_pointer) {
-    auto blas = funcs::GetBlas<Context, T>(dev_ctx);
-    blas.VADD(slice_size, src_pointer, p_pointer, dist_pointer);
+    for (int i = 0; i < slice_size; ++i) {
+      dist_pointer[i] = src_pointer[i] + p_pointer[i];
+    }
   }
 };
 
@@ -111,18 +112,20 @@ void IndexSelectInner(const Context& dev_ctx,
   input->Resize({outer_nums, input_dim[dim], slice_size});
   output->Resize({outer_nums, index_size, slice_size});
 
-  auto input_tensor = EigenTensor<T, 3>::From(*input);
-  auto output_tensor = EigenTensor<T, 3>::From(*output);
-
-  auto& place = *dev_ctx.eigen_device();
+  const auto* input_data = input->data<T>();
+  auto* output_data = output->data<T>();
 
   for (auto j = 0; j < index_size; j++) {
     IndexT index_value = index_data[j];
     if (index_value < 0) {
       index_value += input_dim[dim];
     }
-    auto output_t = output_tensor.chip(j, 1);
-    output_t.device(place) = input_tensor.chip(index_value, 1);
+    for (auto i = 0; i < outer_nums; ++i) {
+      const auto* src =
+          input_data + (i * input_dim[dim] + index_value) * slice_size;
+      auto* dst = output_data + (i * index_size + j) * slice_size;
+      std::memcpy(dst, src, slice_size * sizeof(T));
+    }
   }
   input->Resize(input_dim);
   output->Resize(output_dim);

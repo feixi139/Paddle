@@ -273,12 +273,6 @@ class Blas {
   }
 
   template <typename T>
-  void AXPY(int n, T alpha, const T* x, T* y) const;
-
-  template <typename T>
-  void VADD(int n, const T* x, const T* y, T* z) const;
-
-  template <typename T>
   void VSUB(int n, const T* x, const T* y, T* z) const;
 
   template <typename T>
@@ -295,23 +289,6 @@ class Blas {
 
   template <typename T>
   void VPOW(int n, const T* x, T alpha, T* y) const;
-
-  template <typename T>
-  void GEMV(bool trans_a,
-            int M,
-            int N,
-            T alpha,
-            const T* A,
-            const T* B,
-            T beta,
-            T* C) const;
-
-  template <typename T>
-  T DOT(int n, const T* x, const T* y) const;
-
-  template <typename T>
-  void CUDOT(
-      int n, const T* x, int incx, const T* y, int incy, T* result) const;
 
   template <typename T>
   T ASUM(int n, T* x, int inc) const;
@@ -425,19 +402,6 @@ class Blas {
   template <typename T>
   void VMERF(int n, const T* a, T* y, int64_t mode) const;
 
-  template <typename T>
-  void TRSM(CBLAS_SIDE side,
-            CBLAS_UPLO uplo,
-            CBLAS_TRANSPOSE transA,
-            CBLAS_DIAG diag,
-            int M,
-            int N,
-            T alpha,
-            const T* A,
-            int lda,
-            T* B,
-            int ldb) const;
-
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
   template <typename T>
   void BatchedGETRF(int n, T** a, int* ipiv, int* info, int batch_size) const;
@@ -545,16 +509,6 @@ class BlasT : private Blas<DeviceContext> {
   }
 
   template <typename... ARGS>
-  void AXPY(ARGS... args) const {
-    Base()->template AXPY<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void VADD(ARGS... args) const {
-    Base()->template VADD<T>(args...);
-  }
-
-  template <typename... ARGS>
   void VSUB(ARGS... args) const {
     Base()->template VSUB<T>(args...);
   }
@@ -585,21 +539,6 @@ class BlasT : private Blas<DeviceContext> {
   }
 
   template <typename... ARGS>
-  void GEMV(ARGS... args) const {
-    Base()->template GEMV<T>(args...);
-  }
-
-  template <typename... ARGS>
-  T DOT(ARGS... args) const {
-    return Base()->template DOT<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void CUDOT(ARGS... args) const {
-    Base()->template CUDOT<T>(args...);
-  }
-
-  template <typename... ARGS>
   T ASUM(ARGS... args) const {
     return Base()->template ASUM<T>(args...);
   }
@@ -617,11 +556,6 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void VMERF(ARGS... args) const {
     Base()->template VMERF<T>(args...);
-  }
-
-  template <typename... ARGS>
-  void TRSM(ARGS... args) const {
-    Base()->template TRSM<T>(args...);
   }
 
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)

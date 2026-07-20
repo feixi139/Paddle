@@ -40,8 +40,10 @@ void MvKernel(const Context& dev_ctx,
 
   auto blas = funcs::GetBlas<Context, T>(dev_ctx);
 
-  blas.GEMV(false,
+  blas.GEMM(CblasNoTrans,
+            CblasNoTrans,
             dim_x[0],
+            1,
             dim_x[1],
             static_cast<T>(1),
             x_data,

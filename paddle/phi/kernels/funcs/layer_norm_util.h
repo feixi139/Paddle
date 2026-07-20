@@ -24,8 +24,8 @@ namespace phi {
 namespace funcs {
 
 // Wrap RowwiseMean and ColwiseMean.
-// Reuse the cpu codes and replace the gpu codes with cublas_gemv, which is
-// significantly faster. Unlike the RowwiseMean and ColwiseMean, the
+// Reuse the CPU codes and replace the GPU codes with GEMM, which is
+// significantly faster. Unlike RowwiseMean and ColwiseMean, this
 // implementation only considers 2D.
 template <typename DeviceContext, typename T>
 struct RowwiseMean2D {
@@ -50,8 +50,10 @@ class RowwiseMean2D<GPUContext, T> {
   void operator()(const GPUContext& dev_ctx,
                   const DenseTensor& input,
                   DenseTensor* out) {
-    funcs::GetBlas<GPUContext, T>(dev_ctx).GEMV(false,
+    funcs::GetBlas<GPUContext, T>(dev_ctx).GEMM(CblasNoTrans,
+                                                CblasNoTrans,
                                                 left_,
+                                                1,
                                                 right_,
                                                 1.,
                                                 input.data<T>(),
@@ -108,9 +110,11 @@ class ColwiseSum2D<GPUContext, T> {
   void operator()(const GPUContext& dev_ctx,
                   const DenseTensor& input,
                   DenseTensor* out) {
-    funcs::GetBlas<GPUContext, T>(dev_ctx).GEMV(true,
-                                                left_,
+    funcs::GetBlas<GPUContext, T>(dev_ctx).GEMM(CblasTrans,
+                                                CblasNoTrans,
                                                 right_,
+                                                1,
+                                                left_,
                                                 1.,
                                                 input.data<T>(),
                                                 divisor_.data<T>(),

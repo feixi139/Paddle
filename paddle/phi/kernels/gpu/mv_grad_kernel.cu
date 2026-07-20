@@ -76,9 +76,11 @@ void MvGradKernel(const Context &dev_ctx,
   if (dvec) {
     T *dvec_data = dev_ctx.template Alloc<T>(dvec);
 
-    blas.GEMV(true,
-              dim_x[0],
+    blas.GEMM(CblasTrans,
+              CblasNoTrans,
               dim_x[1],
+              1,
+              dim_x[0],
               static_cast<T>(1),
               x_data,
               dout_data,

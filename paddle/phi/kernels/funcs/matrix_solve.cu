@@ -79,30 +79,34 @@ void SolveLU(const funcs::BlasT<Context, T>& blas,
              int batch_size) {
   constexpr T alpha = 1.0;
   for (int64_t i = 0; i < batch_size; ++i) {
+    const T* a_ptrs[1] = {A + i * n * n};
+    T* b_ptrs[1] = {B + i * m * n};
     // Before: U^T @ L^T @ P @ X = B
-    blas.TRSM(CblasRight,
-              CblasLower,
-              CblasTrans,
-              CblasNonUnit,
-              m,
-              n,
-              alpha,
-              A + i * n * n,
-              n,
-              B + i * m * n,
-              n);
+    blas.BatchedTRSM(CblasRight,
+                     CblasLower,
+                     CblasTrans,
+                     CblasNonUnit,
+                     m,
+                     n,
+                     alpha,
+                     a_ptrs,
+                     n,
+                     b_ptrs,
+                     n,
+                     1);
     // After: L^T @ P @ X = U^T^-1 @ B
-    blas.TRSM(CblasRight,
-              CblasUpper,
-              CblasTrans,
-              CblasUnit,
-              m,
-              n,
-              alpha,
-              A + i * n * n,
-              n,
-              B + i * m * n,
-              n);
+    blas.BatchedTRSM(CblasRight,
+                     CblasUpper,
+                     CblasTrans,
+                     CblasUnit,
+                     m,
+                     n,
+                     alpha,
+                     a_ptrs,
+                     n,
+                     b_ptrs,
+                     n,
+                     1);
     // After: P @ X = L^T^-1 @ U^T^-1 @ B
   }
 }

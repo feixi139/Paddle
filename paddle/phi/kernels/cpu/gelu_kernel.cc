@@ -14,75 +14,31 @@
 
 #include "paddle/phi/kernels/gelu_kernel.h"
 
-#include <algorithm>
 #include <cmath>
-
-#include "glog/logging.h"
 
 #include "paddle/phi/backends/cpu/cpu_context.h"
 #include "paddle/phi/core/kernel_registry.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
-#include "paddle/phi/kernels/funcs/blas/blas_impl.h"
-#include "paddle/phi/kernels/funcs/eigen/common.h"
-#include "paddle/phi/kernels/funcs/eigen/eigen_function.h"
 
 namespace phi {
 
 template <typename T>
 struct GeluFunctor {
-  template <typename Device, typename X, typename Out>
-  void operator()(Device d, X x, Out out, bool approximate) const {
+  void operator()(const T* x, T* out, int n, bool approximate) const {
     if (approximate) {
       // gelu(x) = 0.5 * x * (1 + tanh(sqrt(2 / \pi) * (x + 0.044715 * x^{3})))
-      if (std::is_same<T, dtype::float16>::value) {
-        VLOG(4) << "cast from float16 to float before computing";
-        auto casted_x = x.template cast<float>();
-        auto temp =
-            (static_cast<float>(M_2_SQRTPI * M_SQRT1_2) *
-             (casted_x + static_cast<float>(GELU_CONSTANT) * casted_x.cube()))
-                .tanh();
-        out.device(d) = (casted_x * static_cast<float>(0.5) *
-                         (static_cast<float>(1) + temp))
-                            .template cast<T>();
-      } else {
-        auto temp = (static_cast<T>(M_2_SQRTPI * M_SQRT1_2) *
-                     (x + static_cast<T>(GELU_CONSTANT) * x.cube()))
-                        .tanh();
-        out.device(d) = x * static_cast<T>(0.5) * (static_cast<T>(1) + temp);
+      const T kAlpha = static_cast<T>(M_2_SQRTPI * M_SQRT1_2);
+      for (int i = 0; i < n; ++i) {
+        const T x_val = x[i];
+        const T temp =
+            std::tanh(kAlpha * (x_val + static_cast<T>(GELU_CONSTANT) * x_val *
+                                            x_val * x_val));
+        out[i] = x_val * static_cast<T>(0.5) * (static_cast<T>(1) + temp);
       }
     } else {
-#if defined(PADDLE_WITH_MKLML) && !defined(_WIN32) && !defined(__APPLE__) && \
-    !defined(__OSX__) && !defined(PADDLE_WITH_CUDA) &&                       \
-    !defined(PADDLE_WITH_HIP)
-      auto x_data = x.data();
-      auto out_data = out.data();
-      int n = std::min(x.size(), out.size());
-
-      std::memset(out_data, 0, n * sizeof(T));
-      funcs::CBlas<T>::AXPY(
-          n, static_cast<T>(M_SQRT1_2), x_data, 1, out_data, 1);
-      funcs::CBlas<T>::VMERF(n, out_data, out_data, VML_LA);
-      for (int i = 0; i < n; i++) {
-        out_data[i] += static_cast<T>(1);
+      for (int i = 0; i < n; ++i) {
+        const T erf_term = std::erf(x[i] * static_cast<T>(M_SQRT1_2));
+        out[i] = x[i] * (static_cast<T>(1) + erf_term) * static_cast<T>(0.5);
       }
-      funcs::CBlas<T>::VMUL(n, x_data, out_data, out_data);
-      for (int i = 0; i < n; i++) {
-        out_data[i] *= static_cast<T>(0.5);
-      }
-#else
-      // gelu(x) = 0.5 * x *  (1 + erf(x / sqrt(2)))
-      if (std::is_same<T, dtype::float16>::value) {
-        VLOG(4) << "cast from float16 to float before computing";
-        auto casted_x = x.template cast<float>();
-        auto temp = (casted_x * static_cast<float>(M_SQRT1_2)).erf();
-        out.device(d) = (casted_x * static_cast<float>(0.5) *
-                         (static_cast<float>(1) + temp))
-                            .template cast<T>();
-      } else {
-        auto temp = (x * static_cast<T>(M_SQRT1_2)).erf();
-        out.device(d) = x * static_cast<T>(0.5) * (static_cast<T>(1) + temp);
-      }
-#endif
     }
   }
 };
@@ -96,12 +52,9 @@ void GeluKernel(const Context& dev_ctx,
   if (out && out->numel() == 0) {
     return;
   }
-  auto eigen_out = EigenVector<T>::Flatten(*out);
-  auto eigen_x = EigenVector<T>::Flatten(x);
-  auto& dev = *dev_ctx.eigen_device();
-
   GeluFunctor<T> functor;
-  functor(dev, eigen_x, eigen_out, approximate);
+  functor(
+      x.data<T>(), out->data<T>(), static_cast<int>(x.numel()), approximate);
 }
 
 }  // namespace phi

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "paddle/phi/kernels/funcs/math/context_project.h"
+#include "paddle/phi/backends/gpu/gpu_context.h"
 
 namespace phi {
 namespace math {

@@ -19,10 +19,43 @@
 #include "paddle/phi/core/kernel_registry.h"
 #include "paddle/phi/kernels/empty_kernel.h"
 #include "paddle/phi/kernels/expand_kernel.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
+
 #include "paddle/phi/kernels/funcs/common_shape.h"
 
 namespace phi {
+
+template <typename T>
+void SolveTriangularSystem(const T* a,
+                           T* b,
+                           int m,
+                           int n,
+                           bool upper,
+                           bool transpose,
+                           bool unitriangular) {
+  const bool effective_upper = upper != transpose;
+  auto coeff = [=](int row, int col) {
+    return transpose ? a[col * m + row] : a[row * m + col];
+  };
+  for (int col = 0; col < n; ++col) {
+    if (effective_upper) {
+      for (int row = m - 1; row >= 0; --row) {
+        T sum = b[row * n + col];
+        for (int k = row + 1; k < m; ++k) {
+          sum -= coeff(row, k) * b[k * n + col];
+        }
+        b[row * n + col] = unitriangular ? sum : sum / coeff(row, row);
+      }
+    } else {
+      for (int row = 0; row < m; ++row) {
+        T sum = b[row * n + col];
+        for (int k = 0; k < row; ++k) {
+          sum -= coeff(row, k) * b[k * n + col];
+        }
+        b[row * n + col] = unitriangular ? sum : sum / coeff(row, row);
+      }
+    }
+  }
+}
 
 template <typename T, typename Context>
 void TriangularSolveKernel(const Context& dev_ctx,
@@ -55,7 +88,7 @@ void TriangularSolveKernel(const Context& dev_ctx,
   IntArray y_bst_dims(y_bst_dims_vec);
   ExpandKernel<T, Context>(dev_ctx, y, y_bst_dims, out);
 
-  // Calculate use blas library
+  // Calculate by solving each triangular system in place.
   int M = static_cast<int>(y_bst_dims_vec[y_bst_ndim - 2]);
   int N = static_cast<int>(y_bst_dims_vec[y_bst_ndim - 1]);
   int batch_size = 1;
@@ -63,19 +96,11 @@ void TriangularSolveKernel(const Context& dev_ctx,
     batch_size *= static_cast<int>(x_bst_dims_vec[i]);
   }
 
-  auto blas = funcs::GetBlas<CPUContext, T>(dev_ctx);
-  for (int i = 0; i < batch_size; i++) {
-    blas.TRSM(CblasLeft,
-              upper ? CblasUpper : CblasLower,
-              transpose ? CblasTrans : CblasNoTrans,
-              unitriangular ? CblasUnit : CblasNonUnit,
-              M,
-              N,
-              T(1),
-              x_bst_data + i * M * M,
-              std::max(1, M),
-              out_data + i * N * M,
-              std::max(1, N));
+  for (int i = 0; i < batch_size; ++i) {
+    const auto* x_matrix_ptr = x_bst_data + i * M * M;
+    auto* out_matrix_ptr = out_data + i * M * N;
+    SolveTriangularSystem<T>(
+        x_matrix_ptr, out_matrix_ptr, M, N, upper, transpose, unitriangular);
   }
 }
 

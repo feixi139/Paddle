@@ -85,7 +85,9 @@ struct LRNFunctor<CPUContext, T> {
       blas.VSQUARE(fea_size, idata + i * fea_size, sdata + pre_pad * img_size);
       // init the first channel of mid
       for (int c = 0; c < n; ++c) {
-        blas.AXPY(img_size, alpha, sdata + c * img_size, mdata + i * fea_size);
+        for (int64_t j = 0; j < img_size; ++j) {
+          mdata[i * fea_size + j] += alpha * sdata[c * img_size + j];
+        }
       }
       for (int64_t c = 1; c < C; ++c) {
         // copy previous scale
@@ -93,14 +95,10 @@ struct LRNFunctor<CPUContext, T> {
         std::memcpy(mdata + mid_offset,
                     mdata + mid_offset - img_size,
                     img_size * sizeof(T));
-        // add last
-        blas.AXPY(img_size,
-                  alpha,
-                  sdata + (c + n - 1) * img_size,
-                  mdata + mid_offset);
-        // sub rest
-        blas.AXPY(
-            img_size, -alpha, sdata + (c - 1) * img_size, mdata + mid_offset);
+        for (int64_t j = 0; j < img_size; ++j) {
+          mdata[mid_offset + j] += alpha * sdata[(c + n - 1) * img_size + j];
+          mdata[mid_offset + j] -= alpha * sdata[(c - 1) * img_size + j];
+        }
       }
     }
     // compute the final output

@@ -14,11 +14,29 @@ limitations under the License. */
 
 #pragma once
 
+#include <type_traits>
+
+#include "paddle/phi/backends/cpu/cpu_context.h"
+#include "paddle/phi/backends/gpu/gpu_context.h"
+#include "paddle/phi/common/memory_utils.h"
 #include "paddle/phi/kernels/cholesky_grad_kernel.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/for_range.h"
 
 namespace phi {
+
+template <typename T>
+void SolveLowerTriangularSystem(const T* a, T* b, int m, int n) {
+  for (int col = 0; col < n; ++col) {
+    for (int row = 0; row < m; ++row) {
+      T sum = b[row * n + col];
+      for (int k = 0; k < row; ++k) {
+        sum -= a[row * m + k] * b[k * n + col];
+      }
+      b[row * n + col] = sum / a[row * m + row];
+    }
+  }
+}
 
 template <typename Context, typename T>
 inline void TransCompute(const int dim,
@@ -303,20 +321,51 @@ void CholeskyGradKernel(const Context& dev_ctx,
   auto* identity_data = dev_ctx.template Alloc<T>(&identity);
   EyeFunctor<T> eye_functor(m, m, identity_data);
   for_range(eye_functor);
-  // TODO(guosheng): use trsmBatched for GPU
-  for (int i = 0; i < batch_count; i++) {
-    int64_t offset = static_cast<int64_t>(i) * m * m;
-    blas.TRSM(/*side*/ CblasLeft,
-              /*uplo*/ CblasLower,
-              /*trans*/ CblasNoTrans,
-              /*diag*/ CblasNonUnit,
-              /*m*/ m,
-              /*n*/ m,
-              /*alpha*/ T(1),
-              l_data + offset,
-              /*lda*/ m,
-              identity_data + offset,
-              /*ldb*/ m);
+  if constexpr (std::is_same_v<Context, CPUContext>) {
+    for (int i = 0; i < batch_count; ++i) {
+      int64_t offset = static_cast<int64_t>(i) * m * m;
+      SolveLowerTriangularSystem<T>(
+          l_data + offset, identity_data + offset, m, m);
+    }
+  } else {
+    std::vector<const T*> cpu_l_ptrs(batch_count);
+    std::vector<T*> cpu_identity_ptrs(batch_count);
+    for (int i = 0; i < batch_count; ++i) {
+      int64_t offset = static_cast<int64_t>(i) * m * m;
+      cpu_l_ptrs[i] = l_data + offset;
+      cpu_identity_ptrs[i] = identity_data + offset;
+    }
+    auto place = dev_ctx.GetPlace();
+    auto stream =
+        phi::Stream(reinterpret_cast<phi::StreamId>(dev_ctx.stream()));
+    auto gpu_l_ptrs =
+        phi::memory_utils::Alloc(place, cpu_l_ptrs.size() * sizeof(T*), stream);
+    auto gpu_identity_ptrs = phi::memory_utils::Alloc(
+        place, cpu_identity_ptrs.size() * sizeof(T*), stream);
+    phi::memory_utils::Copy(place,
+                            gpu_l_ptrs->ptr(),
+                            CPUPlace(),
+                            cpu_l_ptrs.data(),
+                            cpu_l_ptrs.size() * sizeof(T*),
+                            dev_ctx.stream());
+    phi::memory_utils::Copy(place,
+                            gpu_identity_ptrs->ptr(),
+                            CPUPlace(),
+                            cpu_identity_ptrs.data(),
+                            cpu_identity_ptrs.size() * sizeof(T*),
+                            dev_ctx.stream());
+    blas.BatchedTRSM(/*side*/ CblasLeft,
+                     /*uplo*/ CblasLower,
+                     /*trans*/ CblasNoTrans,
+                     /*diag*/ CblasNonUnit,
+                     /*m*/ m,
+                     /*n*/ m,
+                     /*alpha*/ T(1),
+                     reinterpret_cast<const T**>(gpu_l_ptrs->ptr()),
+                     /*lda*/ m,
+                     reinterpret_cast<T**>(gpu_identity_ptrs->ptr()),
+                     /*ldb*/ m,
+                     batch_count);
   }
   DenseTensor& l_inverse = identity;
 

@@ -174,11 +174,6 @@ struct CUBlas<float> {
   }
 
   template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasStrsm(args...));
-  }
-
-  template <typename... ARGS>
   static void GETRF_BATCH(ARGS... args) {
     PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasSgetrfBatched(args...));
   }
@@ -257,11 +252,6 @@ struct CUBlas<double> {
   static void GEMM_EX_64(ARGS... args UNUSED) {
     PADDLE_THROW(common::errors::Unimplemented(
         "Currently there are not cublasDgemmEx_64."));
-  }
-
-  template <typename... ARGS>
-  static void TRSM(ARGS... args) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasDtrsm(args...));
   }
 
   template <typename... ARGS>
@@ -691,33 +681,6 @@ struct CUBlas<phi::complex64> {
         ldc));
   }
 
-  static void TRSM(cublasHandle_t handle,
-                   cublasSideMode_t side,
-                   cublasFillMode_t uplo,
-                   cublasOperation_t transa,
-                   cublasDiagType_t diag,
-                   int m,
-                   int n,
-                   const phi::complex64 *alpha,
-                   const phi::complex64 *A,
-                   int lda,
-                   phi::complex64 *B,
-                   int ldb) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasCtrsm(
-        handle,
-        side,
-        uplo,
-        transa,
-        diag,
-        m,
-        n,
-        reinterpret_cast<const cuFloatComplex *>(alpha),
-        reinterpret_cast<const cuFloatComplex *>(A),
-        lda,
-        reinterpret_cast<cuFloatComplex *>(B),
-        ldb));
-  }
-
   // NOTES: GEMM_EX can use Tensor Core to accelerate matrix multiply.
   // https://docs.nvidia.com/cuda/cublas/index.html#cublassetmathmode
   template <typename... ARGS>
@@ -1055,33 +1018,6 @@ struct CUBlas<phi::complex128> {
         reinterpret_cast<const cuDoubleComplex *>(beta),
         reinterpret_cast<cuDoubleComplex *>(C),
         ldc));
-  }
-
-  static void TRSM(cublasHandle_t handle,
-                   cublasSideMode_t side,
-                   cublasFillMode_t uplo,
-                   cublasOperation_t transa,
-                   cublasDiagType_t diag,
-                   int m,
-                   int n,
-                   const phi::complex128 *alpha,
-                   const phi::complex128 *A,
-                   int lda,
-                   phi::complex128 *B,
-                   int ldb) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasZtrsm(
-        handle,
-        side,
-        uplo,
-        transa,
-        diag,
-        m,
-        n,
-        reinterpret_cast<const cuDoubleComplex *>(alpha),
-        reinterpret_cast<const cuDoubleComplex *>(A),
-        lda,
-        reinterpret_cast<cuDoubleComplex *>(B),
-        ldb));
   }
 
   static void TRSM_BATCH(cublasHandle_t handle,
@@ -2422,104 +2358,6 @@ inline void Blas<phi::GPUContext>::GEMM(bool transA,
 
 template <>
 template <typename T>
-void Blas<phi::GPUContext>::AXPY(int n, T alpha, const T *x, T *y) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::AXPY(handle, n, &alpha, x, 1, y, 1);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::CUDOT(
-    int n, const T *x, int incx, const T *y, int incy, T *result) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::DOT(handle, n, x, incx, y, incy, result);
-  });
-}
-
-template <>
-template <>
-inline void Blas<phi::GPUContext>::CUDOT(int n,
-                                         const phi::bfloat16 *x,
-                                         int incx,
-                                         const phi::bfloat16 *y,
-                                         int incy,
-                                         phi::bfloat16 *result) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasDotEx(handle,
-                                                         n,
-                                                         x,
-                                                         CUDA_R_16BF,
-                                                         incx,
-                                                         y,
-                                                         CUDA_R_16BF,
-                                                         incy,
-                                                         result,
-                                                         CUDA_R_16BF,
-                                                         CUDA_R_32F));
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::GEMV(bool trans_a,
-                                 int M,
-                                 int N,
-                                 T alpha,
-                                 const T *A,
-                                 const T *B,
-                                 T beta,
-                                 T *C) const {
-  cublasOperation_t cuTransA = !trans_a ? CUBLAS_OP_T : CUBLAS_OP_N;
-
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::GEMV(handle, cuTransA, N, M, &alpha, A, N, B, 1, &beta, C, 1);
-  });
-}
-
-template <>
-template <>
-inline void Blas<phi::GPUContext>::GEMV(bool trans_a,
-                                        int M,
-                                        int N,
-                                        phi::float16 alpha,
-                                        const phi::float16 *A,
-                                        const phi::float16 *B,
-                                        phi::float16 beta,
-                                        phi::float16 *C) const {
-  // Because cublas doesn't support half gemv, we use cublasHgemm to achieve it.
-  if (trans_a) {
-    this->template GEMM<phi::float16>(
-        CblasNoTrans, CblasNoTrans, 1, N, M, alpha, B, A, beta, C);
-  } else {
-    this->template GEMM<phi::float16>(
-        CblasNoTrans, CblasNoTrans, M, 1, N, alpha, A, B, beta, C);
-  }
-}
-
-template <>
-template <>
-inline void Blas<phi::GPUContext>::GEMV(bool trans_a,
-                                        int M,
-                                        int N,
-                                        phi::bfloat16 alpha,
-                                        const phi::bfloat16 *A,
-                                        const phi::bfloat16 *B,
-                                        phi::bfloat16 beta,
-                                        phi::bfloat16 *C) const {
-  // Because cublas doesn't support bfloat gemv, we use cublasHgemm to achieve
-  // it.
-  if (trans_a) {
-    this->template GEMM<phi::bfloat16>(
-        CblasNoTrans, CblasNoTrans, 1, N, M, alpha, B, A, beta, C);
-  } else {
-    this->template GEMM<phi::bfloat16>(
-        CblasNoTrans, CblasNoTrans, M, 1, N, alpha, A, B, beta, C);
-  }
-}
-
-template <>
-template <typename T>
 void Blas<phi::GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                                         CBLAS_TRANSPOSE transB,
                                         int64_t M,
@@ -3298,98 +3136,6 @@ inline void Blas<phi::GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
 #endif  // CUDA_VERSION >= 11000
 }
 #endif
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::TRSM(CBLAS_SIDE side,
-                                 CBLAS_UPLO uplo,
-                                 CBLAS_TRANSPOSE transA,
-                                 CBLAS_DIAG diag,
-                                 int M,
-                                 int N,
-                                 T alpha,
-                                 const T *A,
-                                 int lda,
-                                 T *B,
-                                 int ldb) const {
-  // solve row major `op ( A ) X = α B` by taking it as `X' op ( A' )  =  α B'`
-  // where ' stands for transpose
-  cublasSideMode_t cuSide =
-      (side == CblasLeft) ? CUBLAS_SIDE_RIGHT : CUBLAS_SIDE_LEFT;
-  cublasFillMode_t cuUplo =
-      (uplo == CblasLower) ? CUBLAS_FILL_MODE_UPPER : CUBLAS_FILL_MODE_LOWER;
-  // use CUBLAS_OP_C (conjugate transpose) for complex
-  cublasOperation_t cuTransA =
-      (transA == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
-  cublasDiagType_t cuDiag =
-      (diag == CblasUnit) ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
-
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::TRSM(
-        handle, cuSide, cuUplo, cuTransA, cuDiag, N, M, &alpha, A, lda, B, ldb);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::BatchedGETRF(
-    int n, T **a, int *ipiv, int *info, int batch_size) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::GETRF_BATCH(handle, n, a, n, ipiv, info, batch_size);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::BatchedGETRI(int n,
-                                         const T **a,
-                                         const int *ipiv,
-                                         T **a_inv,
-                                         int *info,
-                                         int batch_size) const {
-  PADDLE_ENFORCE_NE(
-      a_inv,
-      a,
-      common::errors::InvalidArgument(
-          "cuBLAS function 'cublas<S/D>getrfBatched' cannot be executed "
-          "in-place. The memory space of output matrix (address: %p) cannot "
-          "overlap memory space of input matrix (address: %p).",
-          a_inv,
-          a));
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::GETRI_BATCH(handle, n, a, n, ipiv, a_inv, n, info, batch_size);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::BatchedMatInv(
-    int n, const T **a, T **a_inv, int *info, int batch_size) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::MATINV_BATCH(handle, n, a, n, a_inv, n, info, batch_size);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::BatchedGETRS(CBLAS_TRANSPOSE trans,
-                                         int n,
-                                         int nrhs,
-                                         const T **a,
-                                         int lda,
-                                         int *ipiv,
-                                         T **b,
-                                         int ldb,
-                                         int *info,
-                                         int batch_size) const {
-  // use CUBLAS_OP_C (conjugate transpose) for complex
-  cublasOperation_t cuTrans =
-      (trans == CblasNoTrans) ? CUBLAS_OP_N : CUBLAS_OP_T;
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::GETRS_BATCH(
-        handle, cuTrans, n, nrhs, a, lda, ipiv, b, ldb, info, batch_size);
-  });
-}
 
 template <>
 template <typename T>
