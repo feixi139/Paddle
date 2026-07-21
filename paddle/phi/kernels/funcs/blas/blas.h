@@ -260,6 +260,22 @@ class Blas {
 
   template <typename T>
   void VADD(int n, const T* x, const T* y, T* z) const;
+  void VSUB(int n, const T* x, const T* y, T* z) const;
+
+  template <typename T>
+  void VMUL(int n, const T* x, const T* y, T* z) const;
+
+  template <typename T>
+  void VDIV(int n, const T* x, const T* y, T* z) const;
+
+  template <typename T>
+  void VEXP(int n, const T* x, T* y) const;
+
+  template <typename T>
+  void VSQUARE(int n, const T* x, T* y) const;
+
+  template <typename T>
+  void VPOW(int n, const T* x, T alpha, T* y) const;
 
   template <typename T>
   void GEMV(bool trans_a,
@@ -277,6 +293,7 @@ class Blas {
   template <typename T>
   void CUDOT(
       int n, const T* x, int incx, const T* y, int incy, T* result) const;
+  T ASUM(int n, T* x, int inc) const;
 
   template <typename T>
   void BatchedGEMM(CBLAS_TRANSPOSE transA,
@@ -503,6 +520,33 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void VADD(ARGS... args) const {
     Base()->template VADD<T>(args...);
+  void VSUB(ARGS... args) const {
+    Base()->template VSUB<T>(args...);
+  }
+
+  template <typename... ARGS>
+  void VMUL(ARGS... args) const {
+    Base()->template VMUL<T>(args...);
+  }
+
+  template <typename... ARGS>
+  void VDIV(ARGS... args) const {
+    Base()->template VDIV<T>(args...);
+  }
+
+  template <typename... ARGS>
+  void VEXP(ARGS... args) const {
+    Base()->template VEXP<T>(args...);
+  }
+
+  template <typename... ARGS>
+  void VSQUARE(ARGS... args) const {
+    Base()->template VSQUARE<T>(args...);
+  }
+
+  template <typename... ARGS>
+  void VPOW(ARGS... args) const {
+    Base()->template VPOW<T>(args...);
   }
 
   template <typename... ARGS>
@@ -511,6 +555,7 @@ class BlasT : private Blas<DeviceContext> {
   }
 
   template <typename... ARGS>
+<<<<<<< HEAD
   T DOT(ARGS... args) const {
     return Base()->template DOT<T>(args...);
   }
@@ -518,6 +563,10 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void CUDOT(ARGS... args) const {
     Base()->template CUDOT<T>(args...);
+=======
+  T ASUM(ARGS... args) const {
+    return Base()->template ASUM<T>(args...);
+>>>>>>> b9c6057656 (WIP: Paddle_test before applying Paddle_fix_blas)
   }
 
   template <typename... ARGS>

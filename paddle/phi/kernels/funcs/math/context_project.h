@@ -19,11 +19,21 @@
 
 #include "paddle/common/enforce.h"
 #include "paddle/phi/core/tensor_utils.h"
-#include "paddle/phi/kernels/funcs/blas/blas.h"
+#include "paddle/phi/kernels/funcs/for_range.h"
 #include "paddle/phi/kernels/funcs/im2col.h"
 
 namespace phi {
 namespace math {
+
+template <typename T>
+struct ContextProjectAddFunctor {
+  ContextProjectAddFunctor(const T* in, T* out) : in_(in), out_(out) {}
+
+  HOSTDEVICE void operator()(size_t i) const { out_[i] += in_[i]; }
+
+  const T* in_;
+  T* out_;
+};
 
 /*
  * \brief Context projection concatenates features in adjacent time-steps in
@@ -234,7 +244,6 @@ class ContextProjectGradFunctor {
     int input_row_begin, input_row_end;
     int sequence_height;
     int64_t sequence_width = in.dims()[1];
-    auto blas = funcs::GetBlas<DeviceContext, T>(dev_ctx);
 
     if (input_grad) {
       for (int i = 0; i < static_cast<int>(lod_level_0.size()) - 1; ++i) {
@@ -295,12 +304,9 @@ class ContextProjectGradFunctor {
               DenseTensor out_t_sub = out_t.Slice(
                   k * context_length, k * context_length + padding_size);
               DenseTensor w_sub = padding_data->Slice(k, k + padding_size);
-              PADDLE_ENFORCE_LE_INT_MAX(w_sub.numel(),
-                                        "context_project AXPY size");
-              blas.AXPY(static_cast<int>(w_sub.numel()),
-                        static_cast<T>(1),
-                        out_t_sub.data<T>(),
-                        w_sub.data<T>());
+              funcs::ForRange<DeviceContext> for_range(dev_ctx, w_sub.numel());
+              for_range(ContextProjectAddFunctor<T>(out_t_sub.data<T>(),
+                                                    w_sub.data<T>()));
             }
           }
           if (down_pad > 0) {
@@ -331,12 +337,9 @@ class ContextProjectGradFunctor {
                   (down_pad_begin_row + t) * context_length);
               DenseTensor w_sub = padding_data->Slice(
                   up_pad + padding_idx, up_pad + padding_idx + padding_size);
-              PADDLE_ENFORCE_LE_INT_MAX(w_sub.numel(),
-                                        "context_project AXPY size");
-              blas.AXPY(static_cast<int>(w_sub.numel()),
-                        static_cast<T>(1),
-                        out_t_sub.data<T>(),
-                        w_sub.data<T>());
+              funcs::ForRange<DeviceContext> for_range(dev_ctx, w_sub.numel());
+              for_range(ContextProjectAddFunctor<T>(out_t_sub.data<T>(),
+                                                    w_sub.data<T>()));
             }
           }
           out_t.Resize({sequence_height,

@@ -16,9 +16,20 @@ limitations under the License. */
 
 #include "paddle/phi/core/dense_tensor.h"
 #include "paddle/phi/kernels/funcs/blas/blas.h"
+#include "paddle/phi/kernels/funcs/for_range.h"
 #include "paddle/phi/kernels/funcs/matrix_inverse.h"
 
 namespace phi {
+
+template <typename T>
+struct MatrixPowerAddFunctor {
+  MatrixPowerAddFunctor(const T* in, T* out) : in_(in), out_(out) {}
+
+  HOSTDEVICE void operator()(size_t i) const { out_[i] += in_[i]; }
+
+  const T* in_;
+  T* out_;
+};
 
 template <typename Context, typename T>
 void MatrixPowerGradFunction(const DenseTensor* X,
@@ -127,8 +138,8 @@ void MatrixPowerGradFunction(const DenseTensor* X,
               static_cast<T>(1),
               &da_an_minus1,
               static_cast<T>(0));
-  blas.AXPY(
-      X->numel(), static_cast<T>(1), da_an_minus1.data<T>(), dx_new.data<T>());
+  funcs::ForRange<Context> for_range(dev_ctx, X->numel());
+  for_range(MatrixPowerAddFunctor<T>(da_an_minus1.data<T>(), dx_new.data<T>()));
   int start = 0;
   while (start < new_n - 2) {
     DenseTensor a_da;
@@ -151,8 +162,7 @@ void MatrixPowerGradFunction(const DenseTensor* X,
                 static_cast<T>(1),
                 &a_da_a,
                 static_cast<T>(0));
-    blas.AXPY(
-        X->numel(), static_cast<T>(1), a_da_a.data<T>(), dx_new.data<T>());
+    for_range(MatrixPowerAddFunctor<T>(a_da_a.data<T>(), dx_new.data<T>()));
     start++;
   }
 

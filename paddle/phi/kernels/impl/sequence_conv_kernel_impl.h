@@ -16,6 +16,7 @@
 #include <algorithm>
 
 #include "paddle/phi/core/kernel_registry.h"
+#include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/math/context_project.h"
 #include "paddle/phi/kernels/funcs/math_function.h"
 #include "paddle/utils/optional.h"

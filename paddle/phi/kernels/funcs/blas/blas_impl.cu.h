@@ -2422,46 +2422,6 @@ inline void Blas<phi::GPUContext>::GEMM(bool transA,
 
 template <>
 template <typename T>
-void Blas<phi::GPUContext>::AXPY(int n, T alpha, const T *x, T *y) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::AXPY(handle, n, &alpha, x, 1, y, 1);
-  });
-}
-
-template <>
-template <typename T>
-void Blas<phi::GPUContext>::CUDOT(
-    int n, const T *x, int incx, const T *y, int incy, T *result) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::DOT(handle, n, x, incx, y, incy, result);
-  });
-}
-
-template <>
-template <>
-inline void Blas<phi::GPUContext>::CUDOT(int n,
-                                         const phi::bfloat16 *x,
-                                         int incx,
-                                         const phi::bfloat16 *y,
-                                         int incy,
-                                         phi::bfloat16 *result) const {
-  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasDotEx(handle,
-                                                         n,
-                                                         x,
-                                                         CUDA_R_16BF,
-                                                         incx,
-                                                         y,
-                                                         CUDA_R_16BF,
-                                                         incy,
-                                                         result,
-                                                         CUDA_R_16BF,
-                                                         CUDA_R_32F));
-  });
-}
-
-template <>
-template <typename T>
 void Blas<phi::GPUContext>::GEMV(bool trans_a,
                                  int M,
                                  int N,

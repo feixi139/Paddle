@@ -16,7 +16,6 @@ limitations under the License. */
 #include <set>
 #include <vector>
 
-#include "paddle/phi/kernels/funcs/blas/blas.h"
 #include "paddle/phi/kernels/funcs/selected_rows_functor.h"
 
 #include "paddle/common/ddim.h"
@@ -415,22 +414,9 @@ template struct SelectedRowsAddToTensor<XPUContext, float>;
 }  // namespace phi::funcs
 namespace phi::funcs::scatter {
 
-template <typename T, typename DeviceContext>
-typename std::enable_if<!std::is_integral<T>::value>::type elementwise_add_to(
-    phi::funcs::BlasT<DeviceContext, T>* blas,
-    size_t data_len,
-    const T* in,
-    T* out) {
-  blas->AXPY(data_len, T(1.f), in, out);
-}
-
-template <typename T, typename DeviceContext>
-typename std::enable_if<std::is_integral<T>::value>::type elementwise_add_to(
-    phi::funcs::BlasT<DeviceContext, T>* blas UNUSED,
-    size_t data_len,
-    const T* in,
-    T* out) {
-  for (size_t i = 0; i < data_len; i++) {
+template <typename T>
+void elementwise_add_to(int64_t data_len, const T* in, T* out) {
+  for (int64_t i = 0; i < data_len; ++i) {
     out[i] += in[i];
   }
 }
@@ -442,9 +428,6 @@ add_sparse_inputs(const std::vector<const SelectedRows*>& inputs,
                   int64_t input_width,
                   const DeviceContext& dev_ctx,
                   T* out_data) {
-#ifndef PADDLE_WITH_DNNL
-  auto blas = phi::funcs::GetBlas<DeviceContext, T>(dev_ctx);
-#endif
   for (auto* input : inputs) {
     if (input->rows().empty()) {
       continue;
@@ -464,10 +447,9 @@ add_sparse_inputs(const std::vector<const SelectedRows*>& inputs,
 #else
     for (size_t i = 0; i < input_rows.size(); i++) {
       size_t out_i = rows_to_id.at(input_rows[i]);
-      elementwise_add_to<T, DeviceContext>(&blas,
-                                           static_cast<size_t>(input_width),
-                                           &input_data[i * input_width],
-                                           &out_data[out_i * input_width]);
+      elementwise_add_to<T>(input_width,
+                            &input_data[i * input_width],
+                            &out_data[out_i * input_width]);
     }
 #endif
   }
@@ -478,10 +460,9 @@ typename std::enable_if<!std::is_same<T, phi::bfloat16>::value>::type
 add_sparse_inputs(const std::vector<const SelectedRows*>& inputs,
                   const std::unordered_map<int64_t, size_t>& rows_to_id,
                   int64_t input_width,
-                  const DeviceContext& dev_ctx,
+                  const DeviceContext& dev_ctx UNUSED,
                   T* out_data) {
   VLOG(4) << "[CPU] add_sparse_inputs <" << typeid(T).name();
-  auto blas = phi::funcs::GetBlas<DeviceContext, T>(dev_ctx);
   for (auto* input : inputs) {
     if (input->rows().empty()) {
       continue;
@@ -491,10 +472,9 @@ add_sparse_inputs(const std::vector<const SelectedRows*>& inputs,
 
     for (size_t i = 0; i < input_rows.size(); i++) {
       size_t out_i = rows_to_id.at(input_rows[i]);
-      elementwise_add_to<T, DeviceContext>(&blas,
-                                           static_cast<size_t>(input_width),
-                                           &input_data[i * input_width],
-                                           &out_data[out_i * input_width]);
+      elementwise_add_to<T>(input_width,
+                            &input_data[i * input_width],
+                            &out_data[out_i * input_width]);
     }
   }
 }
@@ -893,7 +873,6 @@ struct MergeAverage<CPUContext, T> {
       rows_to_id[merge_rows[i]] = i;
     }
 
-    auto blas = phi::funcs::GetBlas<CPUContext, T>(dev_ctx);
     for (auto* input : inputs) {
       if (input->rows().empty()) {
         continue;
@@ -903,8 +882,7 @@ struct MergeAverage<CPUContext, T> {
 
       for (size_t i = 0; i < input_rows.size(); i++) {
         size_t out_i = rows_to_id[input_rows[i]];
-        elementwise_add_to<T>(&blas,
-                              static_cast<size_t>(input_width),
+        elementwise_add_to<T>(input_width,
                               &input_data[i * input_width],
                               &out_data[out_i * input_width]);
       }

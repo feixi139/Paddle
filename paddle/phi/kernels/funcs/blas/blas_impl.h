@@ -1713,7 +1713,93 @@ T Blas<CPUContext>::DOT(int n, const T *x, const T *y) const {
     sum += x[i] * y[i];
   }
   return sum;
+void Blas<CPUContext>::VSUB(int n, const T *x, const T *y, T *z) const {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  CBlas<T>::VSUB(n, x, y, z);
+#else
+  // try to find if openblas support vsub
+  for (int i = 0; i < n; ++i) {
+    z[i] = x[i] - y[i];
+  }
 #endif
+}
+
+template <>
+template <typename T>
+void Blas<CPUContext>::VMUL(int n, const T *x, const T *y, T *z) const {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  CBlas<T>::VMUL(n, x, y, z);
+#else
+  // try to find if openblas support vmul
+  for (int i = 0; i < n; ++i) {
+    z[i] = x[i] * y[i];
+  }
+#endif
+}
+
+template <>
+template <typename T>
+void Blas<CPUContext>::VDIV(int n, const T *x, const T *y, T *z) const {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  CBlas<T>::VDIV(n, x, y, z);
+#else
+  // try to find if openblas support vdiv
+  for (int i = 0; i < n; ++i) {
+    z[i] = x[i] / y[i];
+  }
+#endif
+}
+
+template <>
+template <typename T>
+void Blas<CPUContext>::VEXP(int n, const T *x, T *y) const {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  CBlas<T>::VEXP(n, x, y);
+#else
+  // try to find if openblas support vexp
+  for (int i = 0; i < n; ++i) {
+    y[i] = std::exp(x[i]);
+  }
+#endif
+}
+
+template <>
+template <typename T>
+void Blas<CPUContext>::VSQUARE(int n, const T *x, T *y) const {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  CBlas<T>::VSQUARE(n, x, y);
+#else
+  for (int i = 0; i < n; ++i) {
+    y[i] = x[i] * x[i];
+  }
+#endif
+}
+
+template <>
+template <typename T>
+void Blas<CPUContext>::VPOW(int n, const T *x, T a, T *y) const {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  CBlas<T>::VPOW(n, x, a, y);
+#else
+  for (int i = 0; i < n; ++i) {
+    y[i] = std::pow(x[i], a);
+  }
+#endif
+}
+
+template <>
+template <typename T>
+T Blas<CPUContext>::ASUM(int n, T *x, int inc) const {
+  auto sum = static_cast<T>(0.0);
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+  sum = CBlas<T>::ASUM(n, x, inc);
+#else
+  // TODO(jczaja): check if openblas does provide cblas_sasum/cblas_dasum
+  for (int c = 0; c < n; ++c) {
+    sum += x[c];
+  }
+#endif
+  return sum;
 }
 
 template <>

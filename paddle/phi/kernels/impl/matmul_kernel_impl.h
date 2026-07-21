@@ -161,23 +161,16 @@ void MatMulFunctionImplWithBlas(
                 dev_ctx.template Alloc<T>(Out));
       return;
     } else {
-#if defined(PADDLE_WITH_CUDA) && !defined(PADDLE_WITH_HIP) && !defined(_WIN32)
-      if (std::is_same<Context, GPUContext>::value) {
-        blas.CUDOT(M, X.data<T>(), 1, Y.data<T>(), 1, Out->data<T>());
-      } else  // NOLINT
-#endif
-      {
-        blas.GEMM(CblasNoTrans,
-                  CblasTrans,
-                  1,
-                  1,
-                  M,
-                  static_cast<T>(1),
-                  y_data,
-                  x_data,
-                  static_cast<T>(flag),
-                  dev_ctx.template Alloc<T>(Out));
-      }
+      blas.GEMM(CblasNoTrans,
+                CblasTrans,
+                1,
+                1,
+                M,
+                static_cast<T>(1),
+                y_data,
+                x_data,
+                static_cast<T>(flag),
+                dev_ctx.template Alloc<T>(Out));
       return;
     }
   }
