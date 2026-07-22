@@ -23,21 +23,254 @@
 #include <limits>
 #include <vector>
 
+#include "paddle/phi/common/amp_type_traits.h"
 #include "paddle/phi/kernels/funcs/math_function.h"
 
 namespace phi {
 namespace funcs {
 
 namespace detail {
+inline int to_blas_int(int64_t value, const char *name) {
+  PADDLE_ENFORCE_GE(
+      value,
+      0,
+      common::errors::InvalidArgument("BLAS parameter %s must be non-negative, "
+                                      "but received %ld.",
+                                      name,
+                                      value));
+  PADDLE_ENFORCE_LE_INT_MAX(value, name);
+  return static_cast<int>(value);
+}
+
+template <typename T>
+static void axpy_fallback(
+    int64_t n, const T alpha, const T *x, int64_t incx, T *y, int64_t incy) {
+  using MT = typename phi::dtype::MPTypeTrait<T>::Type;
+  const MT mp_alpha = static_cast<MT>(alpha);
+  for (int64_t i = 0; i < n; ++i) {
+    const int64_t x_index = i * incx;
+    const int64_t y_index = i * incy;
+    y[y_index] = static_cast<T>(static_cast<MT>(y[y_index]) +
+                                mp_alpha * static_cast<MT>(x[x_index]));
+  }
+}
+
+inline bool level1_blas_compatible(int64_t n, int64_t incx, int64_t incy) {
+  constexpr auto kIntMin = std::numeric_limits<int>::lowest();
+  constexpr auto kIntMax = std::numeric_limits<int>::max();
+  return n >= 0 && n <= kIntMax && incx >= kIntMin && incx <= kIntMax &&
+         incy >= kIntMin && incy <= kIntMax;
+}
+
+template <typename T, typename BlasAxpy>
+static void axpy_with_blas(int64_t n,
+                           const T alpha,
+                           const T *x,
+                           int64_t incx,
+                           T *y,
+                           int64_t incy,
+                           BlasAxpy blas_axpy) {
+  if (n <= 0) {
+    return;
+  }
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+  if (level1_blas_compatible(n, incx, incy)) {
+    blas_axpy(static_cast<int>(n),
+              alpha,
+              x,
+              static_cast<int>(incx),
+              y,
+              static_cast<int>(incy));
+    return;
+  }
+  axpy_fallback(n, alpha, x, incx, y, incy);
+}
+
 template <typename T>
 static void axpy(
-    int n, const T alpha, const T *x, const int incx, T *y, const int incy) {
-  // Y = Y + alpha * X
-  while (n-- > 0) {
-    *y += alpha * *x;
-    y = y + incy;
-    x = x + incx;
+    int64_t n, const T alpha, const T *x, int64_t incx, T *y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
   }
+  axpy_fallback(n, alpha, x, incx, y, incy);
+}
+
+static void axpy(int64_t n,
+                 const float alpha,
+                 const float *x,
+                 int64_t incx,
+                 float *y,
+                 int64_t incy) {
+  axpy_with_blas(
+      n,
+      alpha,
+      x,
+      incx,
+      y,
+      incy,
+      [](int n, float alpha, const float *x, int incx, float *y, int incy) {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+        phi::dynload::cblas_saxpy(n, alpha, x, incx, y, incy);
+#else
+        cblas_saxpy(n, alpha, x, incx, y, incy);
+#endif
+      });
+}
+
+static void axpy(int64_t n,
+                 const double alpha,
+                 const double *x,
+                 int64_t incx,
+                 double *y,
+                 int64_t incy) {
+  axpy_with_blas(
+      n,
+      alpha,
+      x,
+      incx,
+      y,
+      incy,
+      [](int n, double alpha, const double *x, int incx, double *y, int incy) {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+        phi::dynload::cblas_daxpy(n, alpha, x, incx, y, incy);
+#else
+        cblas_daxpy(n, alpha, x, incx, y, incy);
+#endif
+      });
+}
+
+static void axpy(int64_t n,
+                 const phi::complex64 alpha,
+                 const phi::complex64 *x,
+                 int64_t incx,
+                 phi::complex64 *y,
+                 int64_t incy) {
+  axpy_with_blas(n,
+                 alpha,
+                 x,
+                 incx,
+                 y,
+                 incy,
+                 [](int n,
+                    phi::complex64 alpha,
+                    const phi::complex64 *x,
+                    int incx,
+                    phi::complex64 *y,
+                    int incy) {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+                   phi::dynload::cblas_caxpy(n, &alpha, x, incx, y, incy);
+#else
+        cblas_caxpy(n, &alpha, x, incx, y, incy);
+#endif
+                 });
+}
+
+static void axpy(int64_t n,
+                 const phi::complex128 alpha,
+                 const phi::complex128 *x,
+                 int64_t incx,
+                 phi::complex128 *y,
+                 int64_t incy) {
+  axpy_with_blas(n,
+                 alpha,
+                 x,
+                 incx,
+                 y,
+                 incy,
+                 [](int n,
+                    phi::complex128 alpha,
+                    const phi::complex128 *x,
+                    int incx,
+                    phi::complex128 *y,
+                    int incy) {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+                   phi::dynload::cblas_zaxpy(n, &alpha, x, incx, y, incy);
+#else
+        cblas_zaxpy(n, &alpha, x, incx, y, incy);
+#endif
+                 });
+}
+
+template <typename T>
+static T dot_fallback(
+    int64_t n, const T *x, int64_t incx, const T *y, int64_t incy) {
+  using MT = typename phi::dtype::MPTypeTrait<T>::Type;
+  MT sum = static_cast<MT>(0);
+  for (int64_t i = 0; i < n; ++i) {
+    sum += static_cast<MT>(x[i * incx]) * static_cast<MT>(y[i * incy]);
+  }
+  return static_cast<T>(sum);
+}
+
+template <typename T, typename BlasDot>
+static T dot_with_blas(int64_t n,
+                       const T *x,
+                       int64_t incx,
+                       const T *y,
+                       int64_t incy,
+                       BlasDot blas_dot) {
+  if (n <= 0) {
+    return static_cast<T>(0);
+  }
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+  if (level1_blas_compatible(n, incx, incy)) {
+    return blas_dot(static_cast<int>(n),
+                    x,
+                    static_cast<int>(incx),
+                    y,
+                    static_cast<int>(incy));
+  }
+  return dot_fallback(n, x, incx, y, incy);
+}
+
+template <typename T>
+static T dot(int64_t n, const T *x, int64_t incx, const T *y, int64_t incy) {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+  return dot_fallback(n, x, incx, y, incy);
+}
+
+static float dot(
+    int64_t n, const float *x, int64_t incx, const float *y, int64_t incy) {
+  return dot_with_blas(
+      n,
+      x,
+      incx,
+      y,
+      incy,
+      [](int n, const float *x, int incx, const float *y, int incy) {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+        return phi::dynload::cblas_sdot(n, x, incx, y, incy);
+#else
+        return cblas_sdot(n, x, incx, y, incy);
+#endif
+      });
+}
+
+static double dot(
+    int64_t n, const double *x, int64_t incx, const double *y, int64_t incy) {
+  return dot_with_blas(
+      n,
+      x,
+      incx,
+      y,
+      incy,
+      [](int n, const double *x, int incx, const double *y, int incy) {
+#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
+        return phi::dynload::cblas_ddot(n, x, incx, y, incy);
+#else
+        return cblas_ddot(n, x, incx, y, incy);
+#endif
+      });
 }
 }  // namespace detail
 
@@ -55,6 +288,11 @@ struct CBlas<phi::bfloat16> {
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
     detail::axpy(args...);
+  }
+
+  template <typename... ARGS>
+  static phi::bfloat16 DOT(ARGS... args) {
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -125,7 +363,7 @@ struct CBlas<float> {
 
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
-    phi::dynload::cblas_saxpy(args...);
+    detail::axpy(args...);
   }
 
   template <typename... ARGS>
@@ -135,7 +373,7 @@ struct CBlas<float> {
 
   template <typename... ARGS>
   static float DOT(ARGS... args) {
-    return phi::dynload::cblas_sdot(args...);
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -241,7 +479,7 @@ struct CBlas<double> {
 
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
-    phi::dynload::cblas_daxpy(args...);
+    detail::axpy(args...);
   }
 
   template <typename... ARGS>
@@ -251,7 +489,7 @@ struct CBlas<double> {
 
   template <typename... ARGS>
   static double DOT(ARGS... args) {
-    return phi::dynload::cblas_ddot(args...);
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -324,13 +562,13 @@ struct CBlas<double> {
 template <>
 struct CBlas<phi::complex64> {
   template <typename... ARGS>
-  static void AXPY(int n,
+  static void AXPY(int64_t n,
                    const phi::complex64 alpha,
                    const phi::complex64 *X,
-                   const int incX,
+                   int64_t incX,
                    phi::complex64 *Y,
-                   const int incY) {
-    phi::dynload::cblas_caxpy(n, &alpha, X, incX, Y, incY);
+                   int64_t incY) {
+    detail::axpy(n, alpha, X, incX, Y, incY);
   }
 
   // the libmklml_intel.so paddle used has no vcAdd, vcSub,
@@ -517,13 +755,13 @@ struct CBlas<phi::complex64> {
 template <>
 struct CBlas<phi::complex128> {
   template <typename... ARGS>
-  static void AXPY(int n,
+  static void AXPY(int64_t n,
                    const phi::complex128 alpha,
                    const phi::complex128 *X,
-                   const int incX,
+                   int64_t incX,
                    phi::complex128 *Y,
-                   const int incY) {
-    phi::dynload::cblas_zaxpy(n, &alpha, X, incX, Y, incY);
+                   int64_t incY) {
+    detail::axpy(n, alpha, X, incX, Y, incY);
   }
 
   // the libmklml_intel.so paddle used has no vzAdd, vzSub,
@@ -717,7 +955,7 @@ struct CBlas<float> {
 
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
-    phi::dynload::cblas_saxpy(args...);
+    detail::axpy(args...);
   }
 
   template <typename... ARGS>
@@ -727,7 +965,7 @@ struct CBlas<float> {
 
   template <typename... ARGS>
   static float DOT(ARGS... args) {
-    return phi::dynload::cblas_sdot(args...);
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -795,7 +1033,7 @@ struct CBlas<double> {
 
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
-    phi::dynload::cblas_daxpy(args...);
+    detail::axpy(args...);
   }
 
   template <typename... ARGS>
@@ -805,7 +1043,7 @@ struct CBlas<double> {
 
   template <typename... ARGS>
   static double DOT(ARGS... args) {
-    return phi::dynload::cblas_ddot(args...);
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -867,13 +1105,13 @@ struct CBlas<double> {
 template <>
 struct CBlas<phi::complex64> {
   template <typename... ARGS>
-  static void AXPY(int n,
+  static void AXPY(int64_t n,
                    const phi::complex64 alpha,
                    const phi::complex64 *X,
-                   const int incX,
+                   int64_t incX,
                    phi::complex64 *Y,
-                   const int incY) {
-    phi::dynload::cblas_caxpy(n, &alpha, X, incX, Y, incY);
+                   int64_t incY) {
+    detail::axpy(n, alpha, X, incX, Y, incY);
   }
 
   template <typename... ARGS>
@@ -1035,13 +1273,13 @@ struct CBlas<phi::complex64> {
 template <>
 struct CBlas<phi::complex128> {
   template <typename... ARGS>
-  static void AXPY(int n,
+  static void AXPY(int64_t n,
                    const phi::complex128 alpha,
                    const phi::complex128 *X,
-                   const int incX,
+                   int64_t incX,
                    phi::complex128 *Y,
-                   const int incY) {
-    phi::dynload::cblas_zaxpy(n, &alpha, X, incX, Y, incY);
+                   int64_t incY) {
+    detail::axpy(n, alpha, X, incX, Y, incY);
   }
 
   template <typename... ARGS>
@@ -1211,12 +1449,17 @@ struct CBlas<float> {
 
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
-    cblas_saxpy(args...);
+    detail::axpy(args...);
   }
 
   template <typename... ARGS>
   static void GEMV(ARGS... args) {
     cblas_sgemv(args...);
+  }
+
+  template <typename... ARGS>
+  static float DOT(ARGS... args) {
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -1234,12 +1477,17 @@ struct CBlas<double> {
 
   template <typename... ARGS>
   static void AXPY(ARGS... args) {
-    cblas_daxpy(args...);
+    detail::axpy(args...);
   }
 
   template <typename... ARGS>
   static void GEMV(ARGS... args) {
     cblas_dgemv(args...);
+  }
+
+  template <typename... ARGS>
+  static double DOT(ARGS... args) {
+    return detail::dot(args...);
   }
 
   template <typename... ARGS>
@@ -1251,13 +1499,13 @@ struct CBlas<double> {
 template <>
 struct CBlas<phi::complex64> {
   template <typename... ARGS>
-  static void AXPY(int n,
+  static void AXPY(int64_t n,
                    const phi::complex64 alpha,
                    const phi::complex64 *X,
-                   const int incX,
+                   int64_t incX,
                    phi::complex64 *Y,
-                   const int incY) {
-    cblas_caxpy(n, &alpha, X, incX, Y, incY);
+                   int64_t incY) {
+    detail::axpy(n, alpha, X, incX, Y, incY);
   }
 
   template <typename... ARGS>
@@ -1314,13 +1562,13 @@ struct CBlas<phi::complex64> {
 template <>
 struct CBlas<phi::complex128> {
   template <typename... ARGS>
-  static void AXPY(int n,
+  static void AXPY(int64_t n,
                    const phi::complex128 alpha,
                    const phi::complex128 *X,
-                   const int incX,
+                   int64_t incX,
                    phi::complex128 *Y,
-                   const int incY) {
-    cblas_zaxpy(n, &alpha, X, incX, Y, incY);
+                   int64_t incY) {
+    detail::axpy(n, alpha, X, incX, Y, incY);
   }
 
   template <typename... ARGS>
@@ -1378,6 +1626,16 @@ struct CBlas<phi::complex128> {
 
 template <>
 struct CBlas<phi::float16> {
+  template <typename... ARGS>
+  static void AXPY(ARGS... args) {
+    detail::axpy(args...);
+  }
+
+  template <typename... ARGS>
+  static phi::float16 DOT(ARGS... args) {
+    return detail::dot(args...);
+  }
+
   static void GEMM(...) {
     PADDLE_THROW(common::errors::Unimplemented(
         "float16 GEMM not supported on CPU, please check your code"));
@@ -1403,10 +1661,6 @@ struct CBlas<phi::float16> {
     PADDLE_THROW(common::errors::Unimplemented(
         "float16 VPOW not supported on CPU, please check your code"));
   }
-  static void DOT(...) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "float16 DOT not supported on CPU, please check your code"));
-  };
   static void ASUM(...) {
     PADDLE_THROW(common::errors::Unimplemented(
         "float16 ASUM not supported on CPU, please check your code"));
@@ -1703,16 +1957,13 @@ void Blas<CPUContext>::VADD(int n, const T *x, const T *y, T *z) const {
 
 template <>
 template <typename T>
-T Blas<CPUContext>::DOT(int n, const T *x, const T *y) const {
-#if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  return CBlas<T>::DOT(n, x, 1, y, 1);
-#else
-  // try to find if openblas support cblas_dot
-  T sum = 0;
-  for (int i = 0; i < n; ++i) {
-    sum += x[i] * y[i];
-  }
-  return sum;
+T Blas<CPUContext>::DOT(
+    int64_t n, const T *x, int64_t incx, const T *y, int64_t incy) const {
+  return detail::dot(n, x, incx, y, incy);
+}
+
+template <>
+template <typename T>
 void Blas<CPUContext>::VSUB(int n, const T *x, const T *y, T *z) const {
 #if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
   CBlas<T>::VSUB(n, x, y, z);
@@ -2719,15 +2970,29 @@ void Blas<CPUContext>::TRSM(CBLAS_SIDE side,
                             CBLAS_UPLO uplo,
                             CBLAS_TRANSPOSE transA,
                             CBLAS_DIAG diag,
-                            int M,
-                            int N,
+                            int64_t M,
+                            int64_t N,
                             T alpha,
                             const T *A,
-                            int lda,
+                            int64_t lda,
                             T *B,
-                            int ldb) const {
-  CBlas<T>::TRSM(
-      CblasRowMajor, side, uplo, transA, diag, M, N, alpha, A, lda, B, ldb);
+                            int64_t ldb) const {
+  const int m = detail::to_blas_int(M, "TRSM M");
+  const int n = detail::to_blas_int(N, "TRSM N");
+  const int lda_int = detail::to_blas_int(lda, "TRSM lda");
+  const int ldb_int = detail::to_blas_int(ldb, "TRSM ldb");
+  CBlas<T>::TRSM(CblasRowMajor,
+                 side,
+                 uplo,
+                 transA,
+                 diag,
+                 m,
+                 n,
+                 alpha,
+                 A,
+                 lda_int,
+                 B,
+                 ldb_int);
 }
 
 }  // namespace funcs

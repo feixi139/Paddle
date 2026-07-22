@@ -2422,6 +2422,56 @@ inline void Blas<phi::GPUContext>::GEMM(bool transA,
 
 template <>
 template <typename T>
+void Blas<phi::GPUContext>::CUDOT(int64_t n,
+                                  const T *x,
+                                  int64_t incx,
+                                  const T *y,
+                                  int64_t incy,
+                                  T *result) const {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+  const int n_int = detail::to_blas_int(n, "CUDOT n");
+  const int incx_int = detail::to_blas_int(incx, "CUDOT incx");
+  const int incy_int = detail::to_blas_int(incy, "CUDOT incy");
+  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
+    CUBlas<T>::DOT(handle, n_int, x, incx_int, y, incy_int, result);
+  });
+}
+
+template <>
+template <>
+inline void Blas<phi::GPUContext>::CUDOT(int64_t n,
+                                         const phi::bfloat16 *x,
+                                         int64_t incx,
+                                         const phi::bfloat16 *y,
+                                         int64_t incy,
+                                         phi::bfloat16 *result) const {
+  if (n == 1) {
+    incx = 1;
+    incy = 1;
+  }
+  const int n_int = detail::to_blas_int(n, "CUDOT n");
+  const int incx_int = detail::to_blas_int(incx, "CUDOT incx");
+  const int incy_int = detail::to_blas_int(incy, "CUDOT incy");
+  dev_ctx_.CublasCall([&](cublasHandle_t handle) {
+    PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::cublasDotEx(handle,
+                                                         n_int,
+                                                         x,
+                                                         CUDA_R_16BF,
+                                                         incx_int,
+                                                         y,
+                                                         CUDA_R_16BF,
+                                                         incy_int,
+                                                         result,
+                                                         CUDA_R_16BF,
+                                                         CUDA_R_32F));
+  });
+}
+
+template <>
+template <typename T>
 void Blas<phi::GPUContext>::GEMV(bool trans_a,
                                  int M,
                                  int N,
@@ -3265,13 +3315,17 @@ void Blas<phi::GPUContext>::TRSM(CBLAS_SIDE side,
                                  CBLAS_UPLO uplo,
                                  CBLAS_TRANSPOSE transA,
                                  CBLAS_DIAG diag,
-                                 int M,
-                                 int N,
+                                 int64_t M,
+                                 int64_t N,
                                  T alpha,
                                  const T *A,
-                                 int lda,
+                                 int64_t lda,
                                  T *B,
-                                 int ldb) const {
+                                 int64_t ldb) const {
+  const int m = detail::to_blas_int(M, "TRSM M");
+  const int n = detail::to_blas_int(N, "TRSM N");
+  const int lda_int = detail::to_blas_int(lda, "TRSM lda");
+  const int ldb_int = detail::to_blas_int(ldb, "TRSM ldb");
   // solve row major `op ( A ) X = α B` by taking it as `X' op ( A' )  =  α B'`
   // where ' stands for transpose
   cublasSideMode_t cuSide =
@@ -3285,8 +3339,18 @@ void Blas<phi::GPUContext>::TRSM(CBLAS_SIDE side,
       (diag == CblasUnit) ? CUBLAS_DIAG_UNIT : CUBLAS_DIAG_NON_UNIT;
 
   dev_ctx_.CublasCall([&](cublasHandle_t handle) {
-    CUBlas<T>::TRSM(
-        handle, cuSide, cuUplo, cuTransA, cuDiag, N, M, &alpha, A, lda, B, ldb);
+    CUBlas<T>::TRSM(handle,
+                    cuSide,
+                    cuUplo,
+                    cuTransA,
+                    cuDiag,
+                    n,
+                    m,
+                    &alpha,
+                    A,
+                    lda_int,
+                    B,
+                    ldb_int);
   });
 }
 
@@ -3357,14 +3421,20 @@ void Blas<phi::GPUContext>::BatchedTRSM(CBLAS_SIDE side,
                                         CBLAS_UPLO uplo,
                                         CBLAS_TRANSPOSE transA,
                                         CBLAS_DIAG diag,
-                                        int M,
-                                        int N,
+                                        int64_t M,
+                                        int64_t N,
                                         T alpha,
                                         const T **A,
-                                        int lda,
+                                        int64_t lda,
                                         T **B,
-                                        int ldb,
-                                        int batch_size) const {
+                                        int64_t ldb,
+                                        int64_t batch_size) const {
+  const int m = detail::to_blas_int(M, "BatchedTRSM M");
+  const int n = detail::to_blas_int(N, "BatchedTRSM N");
+  const int lda_int = detail::to_blas_int(lda, "BatchedTRSM lda");
+  const int ldb_int = detail::to_blas_int(ldb, "BatchedTRSM ldb");
+  const int batch_size_int =
+      detail::to_blas_int(batch_size, "BatchedTRSM batch_size");
   // solve row major `op ( A ) X = α B` by taking it as `X' op ( A' )  =  α B'`
   // where ' stands for transpose
   cublasSideMode_t cuSide =
@@ -3383,14 +3453,14 @@ void Blas<phi::GPUContext>::BatchedTRSM(CBLAS_SIDE side,
                           cuUplo,
                           cuTransA,
                           cuDiag,
-                          N,
-                          M,
+                          n,
+                          m,
                           &alpha,
                           A,
-                          lda,
+                          lda_int,
                           B,
-                          ldb,
-                          batch_size);
+                          ldb_int,
+                          batch_size_int);
   });
 }
 

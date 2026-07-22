@@ -260,6 +260,8 @@ class Blas {
 
   template <typename T>
   void VADD(int n, const T* x, const T* y, T* z) const;
+
+  template <typename T>
   void VSUB(int n, const T* x, const T* y, T* z) const;
 
   template <typename T>
@@ -288,11 +290,22 @@ class Blas {
             T* C) const;
 
   template <typename T>
-  T DOT(int n, const T* x, const T* y) const;
+  T DOT(int64_t n, const T* x, int64_t incx, const T* y, int64_t incy) const;
 
   template <typename T>
-  void CUDOT(
-      int n, const T* x, int incx, const T* y, int incy, T* result) const;
+  T DOT(int64_t n, const T* x, const T* y) const {
+    return this->template DOT<T>(n, x, 1, y, 1);
+  }
+
+  template <typename T>
+  void CUDOT(int64_t n,
+             const T* x,
+             int64_t incx,
+             const T* y,
+             int64_t incy,
+             T* result) const;
+
+  template <typename T>
   T ASUM(int n, T* x, int inc) const;
 
   template <typename T>
@@ -403,13 +416,13 @@ class Blas {
             CBLAS_UPLO uplo,
             CBLAS_TRANSPOSE transA,
             CBLAS_DIAG diag,
-            int M,
-            int N,
+            int64_t M,
+            int64_t N,
             T alpha,
             const T* A,
-            int lda,
+            int64_t lda,
             T* B,
-            int ldb) const;
+            int64_t ldb) const;
 
 #if defined(PADDLE_WITH_CUDA) || defined(PADDLE_WITH_HIP)
   template <typename T>
@@ -446,14 +459,14 @@ class Blas {
                    CBLAS_UPLO uplo,
                    CBLAS_TRANSPOSE transA,
                    CBLAS_DIAG diag,
-                   int M,
-                   int N,
+                   int64_t M,
+                   int64_t N,
                    T alpha,
                    const T** a,
-                   int lda,
+                   int64_t lda,
                    T** b,
-                   int ldb,
-                   int batch_size) const;
+                   int64_t ldb,
+                   int64_t batch_size) const;
 #endif
 
  private:
@@ -520,6 +533,9 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void VADD(ARGS... args) const {
     Base()->template VADD<T>(args...);
+  }
+
+  template <typename... ARGS>
   void VSUB(ARGS... args) const {
     Base()->template VSUB<T>(args...);
   }
@@ -555,7 +571,6 @@ class BlasT : private Blas<DeviceContext> {
   }
 
   template <typename... ARGS>
-<<<<<<< HEAD
   T DOT(ARGS... args) const {
     return Base()->template DOT<T>(args...);
   }
@@ -563,10 +578,11 @@ class BlasT : private Blas<DeviceContext> {
   template <typename... ARGS>
   void CUDOT(ARGS... args) const {
     Base()->template CUDOT<T>(args...);
-=======
+  }
+
+  template <typename... ARGS>
   T ASUM(ARGS... args) const {
     return Base()->template ASUM<T>(args...);
->>>>>>> b9c6057656 (WIP: Paddle_test before applying Paddle_fix_blas)
   }
 
   template <typename... ARGS>

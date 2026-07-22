@@ -1848,13 +1848,17 @@ void Blas<GPUContext>::TRSM(CBLAS_SIDE side,
                             CBLAS_UPLO uplo,
                             CBLAS_TRANSPOSE transA,
                             CBLAS_DIAG diag,
-                            int M,
-                            int N,
+                            int64_t M,
+                            int64_t N,
                             T alpha,
                             const T *A,
-                            int lda,
+                            int64_t lda,
                             T *B,
-                            int ldb) const {
+                            int64_t ldb) const {
+  const int m = detail::to_blas_int(M, "TRSM M");
+  const int n = detail::to_blas_int(N, "TRSM N");
+  const int lda_int = detail::to_blas_int(lda, "TRSM lda");
+  const int ldb_int = detail::to_blas_int(ldb, "TRSM ldb");
   // solve row major `op ( A ) X = α B` by taking it as `X' op ( A' )  =  α B'`
   // where ' stands for transpose
   rocblas_side cuSide =
@@ -1869,8 +1873,18 @@ void Blas<GPUContext>::TRSM(CBLAS_SIDE side,
       (diag == CblasUnit) ? rocblas_diagonal_unit : rocblas_diagonal_non_unit;
 
   dev_ctx_.CublasCall([&](rocblas_handle handle) {
-    CUBlas<T>::TRSM(
-        handle, cuSide, cuUplo, cuTransA, cuDiag, N, M, &alpha, A, lda, B, ldb);
+    CUBlas<T>::TRSM(handle,
+                    cuSide,
+                    cuUplo,
+                    cuTransA,
+                    cuDiag,
+                    n,
+                    m,
+                    &alpha,
+                    A,
+                    lda_int,
+                    B,
+                    ldb_int);
   });
 }
 
@@ -1941,14 +1955,20 @@ void Blas<GPUContext>::BatchedTRSM(CBLAS_SIDE side,
                                    CBLAS_UPLO uplo,
                                    CBLAS_TRANSPOSE transA,
                                    CBLAS_DIAG diag,
-                                   int M,
-                                   int N,
+                                   int64_t M,
+                                   int64_t N,
                                    T alpha,
                                    const T **A,
-                                   int lda,
+                                   int64_t lda,
                                    T **B,
-                                   int ldb,
-                                   int batch_size) const {
+                                   int64_t ldb,
+                                   int64_t batch_size) const {
+  const int m = detail::to_blas_int(M, "BatchedTRSM M");
+  const int n = detail::to_blas_int(N, "BatchedTRSM N");
+  const int lda_int = detail::to_blas_int(lda, "BatchedTRSM lda");
+  const int ldb_int = detail::to_blas_int(ldb, "BatchedTRSM ldb");
+  const int batch_size_int =
+      detail::to_blas_int(batch_size, "BatchedTRSM batch_size");
   // solve row major `op ( A ) X = α B` by taking it as `X' op ( A' )  =  α B'`
   // where ' stands for transpose
   rocblas_side cuSide =
@@ -1968,14 +1988,14 @@ void Blas<GPUContext>::BatchedTRSM(CBLAS_SIDE side,
                           cuUplo,
                           cuTransA,
                           cuDiag,
-                          N,
-                          M,
+                          n,
+                          m,
                           &alpha,
                           A,
-                          lda,
+                          lda_int,
                           B,
-                          ldb,
-                          batch_size);
+                          ldb_int,
+                          batch_size_int);
   });
 }
 
