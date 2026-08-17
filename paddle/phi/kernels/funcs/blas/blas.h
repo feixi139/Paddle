@@ -229,12 +229,8 @@ class Blas {
 #endif
 
   template <typename T>
-  void MatMul(const int M,
-              const int N,
-              const int K,
-              const T* A,
-              const T* B,
-              T* C) const;
+  void MatMul(
+      int64_t M, int64_t N, int64_t K, const T* A, const T* B, T* C) const;
 
   template <typename T>
   void MatMul(const DenseTensor& mat_a,
@@ -357,15 +353,15 @@ class Blas {
   template <typename T>
   void BatchedGEMM(CBLAS_TRANSPOSE transA,
                    CBLAS_TRANSPOSE transB,
-                   int M,
-                   int N,
-                   int K,
+                   int64_t M,
+                   int64_t N,
+                   int64_t K,
                    T alpha,
                    const T** A,
                    const T** B,
                    T beta,
                    T** C,
-                   int batchCount) const;
+                   int64_t batchCount) const;
 
 #if defined(PADDLE_WITH_MKLML) && !defined(PADDLE_WITH_CUDA) && \
     !defined(PADDLE_WITH_HIP)
