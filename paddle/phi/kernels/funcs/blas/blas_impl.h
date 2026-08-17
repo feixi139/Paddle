@@ -1444,13 +1444,9 @@ void Blas<DeviceContext>::MatMul(const DenseTensor &mat_a,
                                       "should be same, please check your "
                                       "code."));
 
-  const int64_t K_64 = !trans_a ? dim_a[1] : dim_a[0];
-  PADDLE_ENFORCE_LE_INT_MAX(dim_out[0], "dim_out[0]");
-  PADDLE_ENFORCE_LE_INT_MAX(dim_out[1], "dim_out[1]");
-  PADDLE_ENFORCE_LE_INT_MAX(K_64, "cblas GEMM K");
-  int M = static_cast<int>(dim_out[0]);
-  int N = static_cast<int>(dim_out[1]);
-  int K = static_cast<int>(K_64);
+  const int64_t M = dim_out[0];
+  const int64_t N = dim_out[1];
+  const int64_t K = !trans_a ? dim_a[1] : dim_a[0];
 
   CBLAS_TRANSPOSE transA = !trans_a ? CblasNoTrans : CblasTrans;
   CBLAS_TRANSPOSE transB = !trans_b ? CblasNoTrans : CblasTrans;
@@ -1518,40 +1514,28 @@ void Blas<CPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   PADDLE_ENFORCE_NOT_NULL(
       C, common::errors::InvalidArgument("Pointer C should not be null."));
 
-  if (M > std::numeric_limits<int>::max() ||
-      N > std::numeric_limits<int>::max() ||
-      K > std::numeric_limits<int>::max() ||
-      batchCount > std::numeric_limits<int>::max()) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "CPU BatchedGEMM only supports M, N, K and batchCount not larger "
-        "than INT_MAX. Expected M <= %d, N <= %d, K <= %d and "
-        "batchCount <= %d, but received M = %ld, N = %ld, K = %ld, "
-        "batchCount = %ld.",
-        std::numeric_limits<int>::max(),
-        std::numeric_limits<int>::max(),
-        std::numeric_limits<int>::max(),
-        std::numeric_limits<int>::max(),
-        M,
-        N,
-        K,
-        batchCount));
-  }
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
+  const int64_t strideC = M * N;
 
 #if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  int M_int = static_cast<int>(M);
-  int N_int = static_cast<int>(N);
-  int K_int = static_cast<int>(K);
-  int batch_count_int = static_cast<int>(batchCount);
+  int M_int = detail::to_blas_int(M, "BatchedGEMM M");
+  int N_int = detail::to_blas_int(N, "BatchedGEMM N");
+  int K_int = detail::to_blas_int(K, "BatchedGEMM K");
+  int batch_count_int =
+      detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   int lda = (transA == CblasNoTrans) ? K_int : M_int;
   int ldb = (transB == CblasNoTrans) ? N_int : K_int;
   int ldc = N_int;
   auto a_array = std::vector<const T *>(batchCount);
   auto b_array = std::vector<const T *>(batchCount);
   auto c_array = std::vector<T *>(batchCount);
-  for (int k = 0; k < batchCount; ++k) {
+  for (int k = 0; k < batch_count_int; ++k) {
     a_array[k] = &A[k * strideA];
     b_array[k] = &B[k * strideB];
-    c_array[k] = &C[k * M * N];
+    c_array[k] = &C[k * strideC];
   }
   CBlas<T>::GEMM_BATCH(CblasRowMajor,
                        &transA,
@@ -1573,17 +1557,8 @@ void Blas<CPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   for (int64_t k = 0; k < batchCount; ++k) {
     auto *Ak = &A[k * strideA];
     auto *Bk = &B[k * strideB];
-    auto *Ck = &C[k * M * N];
-    this->template GEMM<T>(transA,
-                           transB,
-                           static_cast<int>(M),
-                           static_cast<int>(N),
-                           static_cast<int>(K),
-                           alpha,
-                           Ak,
-                           Bk,
-                           beta,
-                           Ck);
+    auto *Ck = &C[k * strideC];
+    this->template GEMM<T>(transA, transB, M, N, K, alpha, Ak, Bk, beta, Ck);
   }
 #endif
 }
@@ -1609,30 +1584,28 @@ void Blas<CPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
       B, common::errors::InvalidArgument("Pointer B should not be null."));
   PADDLE_ENFORCE_NOT_NULL(
       C, common::errors::InvalidArgument("Pointer C should not be null."));
-  if (M > std::numeric_limits<int>::max() ||
-      N > std::numeric_limits<int>::max() ||
-      K > std::numeric_limits<int>::max() ||
-      batchCount > std::numeric_limits<int>::max()) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "CPU BatchedGEMM does not support M, N, K or batchCount larger than "
-        "INT_MAX."));
-  }
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
+  const int64_t strideC = M * N;
 
 #if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  int M_int = static_cast<int>(M);
-  int N_int = static_cast<int>(N);
-  int K_int = static_cast<int>(K);
-  int batch_count_int = static_cast<int>(batchCount);
+  int M_int = detail::to_blas_int(M, "BatchedGEMM M");
+  int N_int = detail::to_blas_int(N, "BatchedGEMM N");
+  int K_int = detail::to_blas_int(K, "BatchedGEMM K");
+  int batch_count_int =
+      detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   int lda = (transA == CblasNoTrans) ? K_int : M_int;
   int ldb = (transB == CblasNoTrans) ? N_int : K_int;
   int ldc = N_int;
   auto a_array = std::vector<const T *>(batchCount);
   auto b_array = std::vector<const T *>(batchCount);
   auto c_array = std::vector<T *>(batchCount);
-  for (int k = 0; k < batchCount; ++k) {
+  for (int k = 0; k < batch_count_int; ++k) {
     a_array[k] = &A[k * strideA];
     b_array[k] = &B[k * strideB];
-    c_array[k] = &C[k * M * N];
+    c_array[k] = &C[k * strideC];
   }
 
   CBlas<T>::GEMM_BATCH(CblasRowMajor,
@@ -1655,17 +1628,8 @@ void Blas<CPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   for (int64_t k = 0; k < batchCount; ++k) {
     auto *Ak = &A[k * strideA];
     auto *Bk = &B[k * strideB];
-    auto *Ck = &C[k * M * N];
-    this->template GEMM<T>(transA,
-                           transB,
-                           static_cast<int>(M),
-                           static_cast<int>(N),
-                           static_cast<int>(K),
-                           alpha,
-                           Ak,
-                           Bk,
-                           beta,
-                           Ck);
+    auto *Ck = &C[k * strideC];
+    this->template GEMM<T>(transA, transB, M, N, K, alpha, Ak, Bk, beta, Ck);
   }
 #endif
 }
@@ -1674,25 +1638,29 @@ template <>
 template <typename T>
 void Blas<CPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                                    CBLAS_TRANSPOSE transB,
-                                   int M,
-                                   int N,
-                                   int K,
+                                   int64_t M,
+                                   int64_t N,
+                                   int64_t K,
                                    T alpha,
                                    const T **A,
                                    const T **B,
                                    T beta,
                                    T **C,
-                                   int batchCount) const {
+                                   int64_t batchCount) const {
+  int m = detail::to_blas_int(M, "BatchedGEMM M");
+  int n = detail::to_blas_int(N, "BatchedGEMM N");
+  int k = detail::to_blas_int(K, "BatchedGEMM K");
+  int batch_count = detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
 #if defined(PADDLE_WITH_MKLML) || defined(PADDLE_WITH_HML)
-  const int lda = (std::max)((transA == CblasNoTrans) ? K : M, 1);
-  const int ldb = (std::max)((transB == CblasNoTrans) ? N : K, 1);
-  const int ldc = (std::max)(N, 1);
+  const int lda = (std::max)((transA == CblasNoTrans) ? k : m, 1);
+  const int ldb = (std::max)((transB == CblasNoTrans) ? n : k, 1);
+  const int ldc = (std::max)(n, 1);
   CBlas<T>::GEMM_BATCH(CblasRowMajor,
                        &transA,
                        &transB,
-                       &M,
-                       &N,
-                       &K,
+                       &m,
+                       &n,
+                       &k,
                        &alpha,
                        A,
                        &lda,
@@ -1702,11 +1670,11 @@ void Blas<CPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                        C,
                        &ldc,
                        1 /* group_count */,
-                       &batchCount);
+                       &batch_count);
 #else
-  for (int k = 0; k < batchCount; ++k) {
+  for (int i = 0; i < batch_count; ++i) {
     this->template GEMM<T>(
-        transA, transB, M, N, K, alpha, A[k], B[k], beta, C[k]);
+        transA, transB, m, n, k, alpha, A[i], B[i], beta, C[i]);
   }
 #endif
 }
@@ -1934,7 +1902,7 @@ void Blas<CPUContext>::BatchedGEMMWithHead(CBLAS_TRANSPOSE transA,
 template <typename DeviceContext>
 template <typename T>
 void Blas<DeviceContext>::MatMul(
-    const int M, const int N, const int K, const T *A, const T *B, T *C) const {
+    int64_t M, int64_t N, int64_t K, const T *A, const T *B, T *C) const {
   this->template GEMM<T>(CblasRowMajor,
                          CblasNoTrans,
                          CblasNoTrans,
@@ -1954,7 +1922,7 @@ void Blas<DeviceContext>::MatMul(
 template <>
 template <typename T>
 void Blas<CPUContext>::MatMul(
-    const int M, const int N, const int K, const T *A, const T *B, T *C) const {
+    int64_t M, int64_t N, int64_t K, const T *A, const T *B, T *C) const {
 #ifdef PADDLE_WITH_LIBXSMM
   // Refer to https://github.com/hfp/libxsmm/blob/master/README.md
   // But the threshold is custom constexpr int LIBXSMM_THRESHOLD = 20 * 20 * 20;
@@ -1973,20 +1941,16 @@ void Blas<CPUContext>::MatMul(
   return;
 #endif
 
-  CBlas<T>::GEMM(CblasRowMajor,
-                 CblasNoTrans,
-                 CblasNoTrans,
-                 M,
-                 N,
-                 K,
-                 static_cast<T>(1),
-                 A,
-                 K,
-                 B,
-                 N,
-                 static_cast<T>(0),
-                 C,
-                 N);
+  this->template GEMM<T>(CblasNoTrans,
+                         CblasNoTrans,
+                         M,
+                         N,
+                         K,
+                         static_cast<T>(1),
+                         A,
+                         B,
+                         static_cast<T>(0),
+                         C);
 }
 
 template <typename DeviceContext>

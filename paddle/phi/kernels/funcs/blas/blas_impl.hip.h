@@ -1351,17 +1351,16 @@ void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
   rocblas_operation cuTransB = (transB == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
   dev_ctx_.CublasCall([&](rocblas_handle handle) {
     CUBlas<T>::GEMM_STRIDED_BATCH(handle,
@@ -1405,17 +1404,16 @@ void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
   rocblas_operation cuTransB = (transB == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
 
   T h_alpha = static_cast<T>(alpha);
@@ -1463,17 +1461,16 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
   rocblas_operation cuTransB = (transB == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
   dev_ctx_.CublasCall([&](rocblas_handle handle) {
     PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::rocblas_hgemm_strided_batched(
@@ -1518,17 +1515,16 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
   rocblas_operation cuTransB = (transB == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
 
   float16 h_alpha = static_cast<float16>(alpha);
@@ -1579,17 +1575,16 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
   rocblas_operation cuTransB = (transB == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
   dev_ctx_.CublasCall([&](rocblas_handle handle) {
     PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::rocblas_sgemm_strided_batched(
@@ -1634,17 +1629,16 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
   rocblas_operation cuTransB = (transB == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
   dev_ctx_.CublasCall([&](rocblas_handle handle) {
     PADDLE_ENFORCE_GPU_SUCCESS(phi::dynload::rocblas_dgemm_strided_batched(
@@ -1687,11 +1681,10 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
@@ -1755,12 +1748,11 @@ inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
   int64_t lda = (transA == CblasNoTrans) ? K : M;
   int64_t ldb = (transB == CblasNoTrans) ? N : K;
   int64_t ldc = N;
+  detail::to_blas_int(M, "BatchedGEMM M");
+  detail::to_blas_int(N, "BatchedGEMM N");
+  detail::to_blas_int(K, "BatchedGEMM K");
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
   const int64_t strideC = M * N;
-  if (M > INT_MAX_VALUE || N > INT_MAX_VALUE || K > INT_MAX_VALUE ||
-      batchCount > INT_MAX_VALUE) {
-    PADDLE_THROW(common::errors::Unimplemented(
-        "Hip BatchedGEMM not supported for large tensor size"));
-  }
   rocblas_operation cuTransA = (transA == CblasNoTrans)
                                    ? rocblas_operation_none
                                    : rocblas_operation_transpose;
@@ -1809,18 +1801,19 @@ template <>
 template <typename T>
 void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                                    CBLAS_TRANSPOSE transB,
-                                   int M,
-                                   int N,
-                                   int K,
+                                   int64_t M,
+                                   int64_t N,
+                                   int64_t K,
                                    T alpha,
                                    const T **A,
                                    const T **B,
                                    T beta,
                                    T **C,
-                                   int batchCount) const {
-  for (int k = 0; k < batchCount; ++k) {
+                                   int64_t batchCount) const {
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
+  for (int64_t i = 0; i < batchCount; ++i) {
     this->template GEMM<T>(
-        transA, transB, M, N, K, alpha, A[k], B[k], beta, C[k]);
+        transA, transB, M, N, K, alpha, A[i], B[i], beta, C[i]);
   }
 }
 
@@ -1828,18 +1821,19 @@ template <>
 template <>
 inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                                           CBLAS_TRANSPOSE transB,
-                                          int M,
-                                          int N,
-                                          int K,
+                                          int64_t M,
+                                          int64_t N,
+                                          int64_t K,
                                           phi::float16 alpha,
                                           const phi::float16 **A,
                                           const phi::float16 **B,
                                           phi::float16 beta,
                                           phi::float16 **C,
-                                          int batchCount) const {
-  for (int k = 0; k < batchCount; ++k) {
+                                          int64_t batchCount) const {
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
+  for (int64_t i = 0; i < batchCount; ++i) {
     this->template GEMM<phi::float16>(
-        transA, transB, M, N, K, alpha, A[k], B[k], beta, C[k]);
+        transA, transB, M, N, K, alpha, A[i], B[i], beta, C[i]);
   }
 }
 
@@ -1847,18 +1841,19 @@ template <>
 template <>
 inline void Blas<GPUContext>::BatchedGEMM(CBLAS_TRANSPOSE transA,
                                           CBLAS_TRANSPOSE transB,
-                                          int M,
-                                          int N,
-                                          int K,
+                                          int64_t M,
+                                          int64_t N,
+                                          int64_t K,
                                           phi::bfloat16 alpha,
                                           const phi::bfloat16 **A,
                                           const phi::bfloat16 **B,
                                           phi::bfloat16 beta,
                                           phi::bfloat16 **C,
-                                          int batchCount) const {
-  for (int k = 0; k < batchCount; ++k) {
+                                          int64_t batchCount) const {
+  detail::to_blas_int(batchCount, "BatchedGEMM batchCount");
+  for (int64_t i = 0; i < batchCount; ++i) {
     this->template GEMM<phi::bfloat16>(
-        transA, transB, M, N, K, alpha, A[k], B[k], beta, C[k]);
+        transA, transB, M, N, K, alpha, A[i], B[i], beta, C[i]);
   }
 }
 
